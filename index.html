@@ -1,9 +1,9 @@
 <!doctype html>
 <html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#070b14">
 <title>Yutu Studio — Automatización de video</title><link rel="stylesheet" href="styles.css"></head>
-<body><div id="splash"><div class="sp-mark">Y</div><div class="sp-bar"><i></i></div></div><div class="glow g1"></div><div class="glow g2"></div><div class="glow g3"></div><div id="spot"></div>
+<body><div id="splash"><div class="sp-mark">Y</div><div class="sp-bar"><i></i></div></div>
 <header class="nav"><a class="brand" href="#top"><span class="mark">Y</span>Yutu <b>Studio</b></a>
-<nav><a href="#importar">Importar</a><a href="#cola">Cola</a><a href="#auto">Automatización</a><a href="#flujo">Flujo</a></nav></header>
+<nav><a href="#importar">Importar</a><a href="#cola">Cola</a><a href="#control">Ejecutar</a><a href="#auto">Automatización</a><a href="#flujo">Flujo</a></nav></header>
 <main id="top">
 <section class="hero"><div><span class="chip">● Panel de producción</span><h1>Pegá links. <em>Publicá solo.</em></h1>
 <p>Armá tu cola, definí cuántos Shorts y videos salen por día y dejá que el worker descargue, recorte, subtitule y programe todo en tu canal.</p>
@@ -17,7 +17,16 @@
 <section id="cola"><div class="head"><span class="chip">PASO 2</span><h2>Cola de trabajo</h2><p>Elegí si cada link sale como Short (vertical, ≤58 s) o como video normal.</p></div>
 <div class="card"><div class="bar"><b id="qcount">0 elementos</b><div class="row"><button class="btn ghost sm" id="all-short">Todos Shorts</button><button class="btn ghost sm" id="all-video">Todos Videos</button><button class="btn ghost sm danger" id="empty">Vaciar</button></div></div><div id="list"></div></div></section>
 
-<section id="auto"><div class="head"><span class="chip">PASO 3</span><h2>Automatización</h2><p>Ritmo de publicación y subtítulos.</p></div>
+<section id="control"><div class="head"><span class="chip">PASO 3</span><h2>Conectar y ejecutar</h2><p>Conectá tu canal y empezá la edición en el momento.</p></div>
+<div class="grid2"><div class="card pad ctl">
+<div class="pill-row"><span class="pill" id="p-worker"><i></i>Worker en tu PC</span><span class="pill" id="p-yt"><i></i>Canal de YouTube</span></div>
+<button class="btn ghost" id="connect">Conectar con mi canal de YouTube ▷</button>
+<button class="btn pri big" id="start">Comenzar ahora el proceso de edición ▶</button>
+<div id="ctl-msg" class="msg"></div>
+<p class="sub">Primero ejecutá <code>worker\2-INSTALAR-Y-EJECUTAR.bat</code> y dejá esa ventana abierta.</p></div>
+<div class="card pad"><h3>Progreso</h3><pre id="log" class="log">Esperando al worker...</pre></div></div></section>
+
+<section id="auto"><div class="head"><span class="chip">PASO 4</span><h2>Automatización</h2><p>Ritmo de publicación y subtítulos.</p></div>
 <div class="grid2"><div class="card pad cfg">
 <label>Shorts por día<input id="c-sn" type="number" min="0" max="6"></label>
 <label>Horarios Shorts<input id="c-st" placeholder="09:00,14:00,20:00"></label>

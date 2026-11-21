@@ -42,11 +42,32 @@ addEventListener("load",()=>setTimeout(()=>$("splash").classList.add("out"),1300
 document.querySelectorAll(".head,.card:not(.stat),.stat,.steps>*").forEach((e,i)=>{e.classList.add("rv");e.style.transitionDelay=(i%4)*70+"ms"});
 const io=new IntersectionObserver(es=>es.forEach(x=>{if(x.isIntersecting){x.target.classList.add("in");io.unobserve(x.target)}}),{threshold:.12});
 document.querySelectorAll(".rv").forEach(e=>io.observe(e));
-addEventListener("pointermove",e=>{const s=$("spot");s.style.left=e.clientX+"px";s.style.top=e.clientY+"px"});
 document.addEventListener("click",e=>{const b=e.target.closest(".btn");if(!b)return;const r=b.getBoundingClientRect(),s=document.createElement("span");s.className="rp";const d=Math.max(r.width,r.height);s.style.cssText=`width:${d}px;height:${d}px;left:${e.clientX-r.left-d/2}px;top:${e.clientY-r.top-d/2}px`;b.appendChild(s);setTimeout(()=>s.remove(),600)});
 function openWin(t,html){$("win-title").textContent=t;$("win-body").innerHTML=html;$("win").classList.add("open");$("win").setAttribute("aria-hidden","false")}
 function closeWin(){$("win").classList.remove("open");$("win").setAttribute("aria-hidden","true")}
 $("win").onclick=e=>{if(e.target===$("win")||e.target.dataset.close!==undefined)closeWin()};addEventListener("keydown",e=>{if(e.key==="Escape")closeWin()});
 $("list").addEventListener("click",e=>{if(e.target.closest("button"))return;const it=e.target.closest(".item");if(!it)return;const x=q.find(y=>y.key===it.querySelector("[data-r]").dataset.r);
 openWin(x.type==="playlist"?"Playlist":"Vista previa",(x.type==="video"?`<img src="https://i.ytimg.com/vi/${x.id}/hqdefault.jpg" alt="Miniatura" onerror="this.remove()">`:"")+`<p><b>Salida:</b> ${x.kind==="short"?"Short vertical 9:16":"Video completo"}</p><p class="sub" style="word-break:break-all">${esc(x.url)}</p>`)});
-$("open-guide").onclick=()=>openWin("Guía de activación",`<ol><li>Exportá la cola con el botón verde.</li><li>Poné <code>client_secret.json</code> (OAuth de escritorio, YouTube Data API v3) en la carpeta <code>worker</code>.</li><li>Ejecutá <code>2-INSTALAR-Y-EJECUTAR.bat</code>.</li><li>Dejá la PC encendida: cada video queda programado en su horario.</li></ol>`);
+$("open-guide").onclick=()=>openWin("Guía de activación",`<ol><li>Ejecutá <code>worker\\2-INSTALAR-Y-EJECUTAR.bat</code> y dejá la ventana abierta.</li><li>Tocá <b>Conectar con mi canal de YouTube</b> e iniciá sesión en el Chrome que se abre (solo una vez).</li><li>Tocá <b>Comenzar ahora el proceso de edición</b>.</li></ol><p class="sub">Esa sesión de Chrome es el permiso para publicar en tu canal.</p>`);
+
+/* worker local */
+const API="http://127.0.0.1:8765";
+async function call(path,body){const c=new AbortController(),t=setTimeout(()=>c.abort(),4000);
+try{const r=await fetch(API+path,body?{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body),signal:c.signal}:{signal:c.signal});return await r.json()}catch{return null}finally{clearTimeout(t)}}
+const setPill=(id,s,t)=>{const e=$(id);e.className="pill "+s;e.lastChild.textContent=t};
+let running=false;
+async function poll(){
+if(!document.hidden){const s=await call("/status");
+if(!s){setPill("p-worker","","Worker apagado");setPill("p-yt","","Canal sin conectar");running=false;$("start").disabled=false}
+else{running=s.running;setPill("p-worker","ok","Worker conectado");
+setPill("p-yt",s.youtube?"ok":(s.watching?"wait":""),s.youtube?"Canal conectado":(s.watching?"Esperando tu inicio de sesión…":"Canal sin conectar"));
+$("log").textContent=s.log.length?s.log.join("\n"):"Sin actividad todavía.";$("log").scrollTop=1e9;$("start").disabled=s.running;
+$("start").textContent=s.running?"Procesando…":"Comenzar ahora el proceso de edición ▶"}}
+setTimeout(poll,running?2500:7000)}
+const note=(t,err)=>{const m=$("ctl-msg");m.textContent=t;m.className="msg"+(err?" err":"")};
+$("connect").onclick=async()=>{const r=await call("/connect",{});if(!r)return note("No encuentro el worker. Ejecutá 2-INSTALAR-Y-EJECUTAR.bat y dejá la ventana abierta.",1);
+note(r.message||"Iniciá sesión en YouTube en el Chrome que se abrió.");poll()};
+$("start").onclick=async()=>{if(!q.length)return note("La cola está vacía: agregá links primero.",1);
+const r=await call("/start",{config:cfg,items:q});if(!r)return note("No encuentro el worker. Ejecutá 2-INSTALAR-Y-EJECUTAR.bat y dejá la ventana abierta.",1);
+note(r.message,!r.ok);poll()};
+poll();

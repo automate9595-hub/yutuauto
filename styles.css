@@ -64,3 +64,16 @@ h1 em{background-size:200% 100%;animation:shine 5s linear infinite}
 @keyframes pop{from{transform:scale(.2) rotate(-25deg);opacity:0}}@keyframes pulse{50%{box-shadow:0 0 50px #7ff0c066}}@keyframes load{to{transform:none}}
 @keyframes drift{50%{transform:translate(90px,60px) scale(1.15)}}@keyframes shine{to{background-position:200% 0}}@keyframes float{50%{transform:translateY(-5px)}}@keyframes rip{to{transform:scale(4);opacity:0}}
 @media(prefers-reduced-motion:reduce){.rv{opacity:1;transform:none;filter:none}#splash{display:none}}
+
+/* modo liviano */
+.glow,#spot{display:none}
+body{background:radial-gradient(ellipse at 0 0,#14382f55,transparent 45%),radial-gradient(ellipse at 100% 100%,#1a2a6c44,transparent 45%),var(--bg)}
+.nav{backdrop-filter:none;background:#070b14f2}.card{backdrop-filter:none;background:#0f1726}
+.rv{filter:none;transform:translateY(20px);transition:opacity .5s,transform .5s}.rv.in{transform:none}
+.chip,h1 em{animation:none}#splash.out{filter:none}#splash{transition:opacity .4s,visibility .4s}
+.win-back.open{backdrop-filter:blur(5px)}.win{filter:none;transition:opacity .3s,transform .3s}
+.ctl{display:grid;gap:14px;align-content:start}.big{padding:18px 20px;font-size:17px}
+.pill-row{display:flex;gap:10px;flex-wrap:wrap}.pill{display:inline-flex;align-items:center;gap:8px;font-size:13px;font-weight:600;color:var(--mu);background:#0a1220;border:1px solid #2a3b57;padding:7px 13px;border-radius:99px}
+.pill i{width:9px;height:9px;border-radius:50%;background:#55637a}.pill.ok{color:var(--mint);border-color:#2b5b4b}.pill.ok i{background:var(--mint)}.pill.wait i{background:#ffd166}
+.log{margin:0;background:#0a1220;border:1px solid #1d2c46;border-radius:10px;padding:12px;height:260px;overflow:auto;font:12px/1.6 ui-monospace,Consolas,monospace;color:#b9c7dc;white-space:pre-wrap;word-break:break-word}
+.btn:disabled{opacity:.5;cursor:not-allowed;transform:none}
