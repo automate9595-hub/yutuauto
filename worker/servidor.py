@@ -34,14 +34,17 @@ def launch_chrome():
 def check_login():
     try:
         r = subprocess.run([sys.executable, "yutu.py", "--estado"], cwd=ROOT, capture_output=True, text=True, timeout=90, env=ENV)
-        return "LOGIN_OK" in r.stdout
-    except Exception:
-        return False
+        line = (r.stdout.strip().splitlines() or ["LOGIN_NO sin respuesta " + r.stderr.strip()[-120:]])[-1]
+    except Exception as e:
+        line = "LOGIN_NO error=" + str(e)[:120]
+    if state.get("detail") != line: state["detail"] = line; log("Verificando sesion de YouTube: " + line)
+    return line.startswith("LOGIN_OK")
 
 def watch():
     state["watching"] = True; end = time.time() + 600
-    while time.time() < end and not state["youtube"]:
-        time.sleep(6); state["youtube"] = check_login()
+    while time.time() < end:
+        if check_login(): state["youtube"] = True; break
+        time.sleep(5)
     state["watching"] = False
     if state["youtube"]: log("Canal de YouTube conectado.")
 

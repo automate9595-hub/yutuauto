@@ -1,5 +1,5 @@
 """Yutu worker: descarga -> recorte -> subtitulos -> subida a YouTube Studio (sin Google Cloud)."""
-import json, subprocess, sys, pathlib, datetime as dt
+import json, subprocess, sys, time, pathlib, datetime as dt
 ROOT = pathlib.Path(__file__).parent
 MEDIA = ROOT / "media"; MEDIA.mkdir(exist_ok=True)
 QF = ROOT / "queue.json"
@@ -116,7 +116,8 @@ def studio_upload(d):
         page = browser.contexts[0].new_page()
         page.goto("https://studio.youtube.com", wait_until="domcontentloaded")
         print("Si no iniciaste sesion en YouTube, hacelo en la ventana de Chrome (espero hasta 5 min)...")
-        page.wait_for_selector("#create-icon", timeout=300000)
+        if not wait_login(page, 300):
+            raise RuntimeError("No detecte tu sesion en YouTube Studio (pagina actual: " + page.url + ")")
         for it in pending:
             try:
                 studio_upload_one(page, it); print("Programado:", it["title"], it["publishAt"])
@@ -140,17 +141,32 @@ def main():
         except Exception as e: print("Fallo la subida automatica:", e)
     print("Listo. Videos terminados en la carpeta media. Plan: plan-publicacion.txt")
 
+def logged_in(page):
+    u = page.url
+    if "studio.youtube.com/channel/" in u: return True
+    return "studio.youtube.com" in u and page.locator("#create-icon, #upload-icon").count() > 0
+
+def wait_login(page, secs):
+    end = time.time() + secs
+    while time.time() < end:
+        try:
+            if logged_in(page): return True
+        except Exception: pass
+        page.wait_for_timeout(1000)
+    return False
+
 def estado():
     try:
         from playwright.sync_api import sync_playwright
         with sync_playwright() as p:
-            b = p.chromium.connect_over_cdp("http://127.0.0.1:9222")
-            page = b.contexts[0].new_page()
-            page.goto("https://studio.youtube.com", wait_until="domcontentloaded")
-            page.wait_for_selector("#create-icon", timeout=12000); page.close()
-        print("LOGIN_OK")
-    except Exception:
-        print("LOGIN_NO")
+            ctx = p.chromium.connect_over_cdp("http://127.0.0.1:9222").contexts[0]
+            for pg in ctx.pages:
+                if "studio.youtube.com/channel/" in pg.url: print("LOGIN_OK"); return
+            page = ctx.new_page(); page.goto("https://studio.youtube.com", wait_until="domcontentloaded")
+            ok = wait_login(page, 15); url = page.url; page.close()
+            print("LOGIN_OK" if ok else "LOGIN_NO pagina=" + url[:120])
+    except Exception as e:
+        print("LOGIN_NO error=" + str(e)[:160])
 
 if __name__ == "__main__":
     estado() if "--estado" in sys.argv else main()
