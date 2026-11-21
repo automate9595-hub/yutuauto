@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#070b14">
+<title>Yutu Studio — Automatización de video</title><link rel="stylesheet" href="styles.css"></head>
+<body><div id="splash"><div class="sp-mark">Y</div><div class="sp-bar"><i></i></div></div><div class="glow g1"></div><div class="glow g2"></div><div class="glow g3"></div><div id="spot"></div>
+<header class="nav"><a class="brand" href="#top"><span class="mark">Y</span>Yutu <b>Studio</b></a>
+<nav><a href="#importar">Importar</a><a href="#cola">Cola</a><a href="#auto">Automatización</a><a href="#flujo">Flujo</a></nav></header>
+<main id="top">
+<section class="hero"><div><span class="chip">● Panel de producción</span><h1>Pegá links. <em>Publicá solo.</em></h1>
+<p>Armá tu cola, definí cuántos Shorts y videos salen por día y dejá que el worker descargue, recorte, subtitule y programe todo en tu canal.</p>
+<div class="row"><a class="btn pri" href="#importar">Empezar ahora →</a><a class="btn ghost" href="#flujo">Ver el flujo</a></div></div>
+<div class="stats"><div class="card stat"><small>EN COLA</small><strong id="s-total">0</strong></div><div class="card stat"><small>SHORTS</small><strong id="s-short">0</strong></div><div class="card stat"><small>VIDEOS</small><strong id="s-video">0</strong></div><div class="card stat acc"><small>DÍAS CUBIERTOS</small><strong id="s-days">0</strong></div></div></section>
+
+<section id="importar"><div class="head"><span class="chip">PASO 1</span><h2>Importar desde YouTube</h2><p>Un link por línea: videos, Shorts o playlists completas.</p></div>
+<div class="card pad"><textarea id="links" spellcheck="false" placeholder="https://www.youtube.com/watch?v=xxxxxxxxxxx&#10;https://youtube.com/shorts/yyyyyyyyyyy&#10;https://www.youtube.com/playlist?list=PLxxxx"></textarea>
+<div class="row"><button class="btn pri" id="add">Analizar y agregar →</button><button class="btn ghost" id="clr">Limpiar</button><span id="msg" class="msg"></span></div></div></section>
+
+<section id="cola"><div class="head"><span class="chip">PASO 2</span><h2>Cola de trabajo</h2><p>Elegí si cada link sale como Short (vertical, ≤58 s) o como video normal.</p></div>
+<div class="card"><div class="bar"><b id="qcount">0 elementos</b><div class="row"><button class="btn ghost sm" id="all-short">Todos Shorts</button><button class="btn ghost sm" id="all-video">Todos Videos</button><button class="btn ghost sm danger" id="empty">Vaciar</button></div></div><div id="list"></div></div></section>
+
+<section id="auto"><div class="head"><span class="chip">PASO 3</span><h2>Automatización</h2><p>Ritmo de publicación y subtítulos.</p></div>
+<div class="grid2"><div class="card pad cfg">
+<label>Shorts por día<input id="c-sn" type="number" min="0" max="6"></label>
+<label>Horarios Shorts<input id="c-st" placeholder="09:00,14:00,20:00"></label>
+<label>Videos por día<input id="c-vn" type="number" min="0" max="6"></label>
+<label>Horarios Videos<input id="c-vt" placeholder="12:00,18:00"></label>
+<label>Idioma de subtítulos<select id="c-lang"><option value="es">Español</option><option value="en">Inglés</option><option value="auto">Detectar</option></select></label>
+<label class="chk"><input id="c-sub" type="checkbox"> Subtítulos quemados en el video</label>
+<button class="btn ghost" id="open-guide">Abrir guía de activación ◧</button><button class="btn pri" id="export">Exportar cola para el worker ↓</button></div>
+<div class="card pad"><h3>Calendario previsto</h3><div id="sched" class="sched"></div></div></div></section>
+
+<section id="flujo"><div class="head"><span class="chip">FLUJO</span><h2>Qué hace el worker</h2><p>Corre en tu PC con <code>2-INSTALAR-Y-EJECUTAR.bat</code>: GitHub Pages solo muestra este panel.</p></div>
+<div class="steps"><div class="card step"><i>1</i><b>Descarga</b><p>yt-dlp baja video o playlist.</p></div><div class="card step"><i>2</i><b>Recorte</b><p>Short: 58 s en 9:16. Video: completo.</p></div><div class="card step"><i>3</i><b>Subtítulos</b><p>Whisper transcribe y los quema.</p></div><div class="card step"><i>4</i><b>Publica</b><p>Sube y programa por la API de YouTube.</p></div></div>
+<div class="card pad note"><b>Usá contenido tuyo o con permiso.</b> Resubir videos ajenos viola los términos de YouTube y suele terminar en strikes o monetización denegada.</div></section>
+</main><div id="win" class="win-back" aria-hidden="true"><div class="win" role="dialog" aria-modal="true"><div class="win-bar"><span class="d r" data-close></span><span class="d y" data-close></span><span class="d g"></span><b id="win-title"></b></div><div id="win-body" class="win-body"></div></div></div>
+<footer>Yutu Studio · v2.0</footer><script src="app.js"></script></body></html>
