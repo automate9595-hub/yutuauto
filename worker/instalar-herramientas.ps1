@@ -8,6 +8,7 @@ if(-not $hasPy -and -not (Test-Path $py)){
   $f="$tmp\python.exe"; Invoke-WebRequest https://www.python.org/ftp/python/3.12.8/python-3.12.8-amd64.exe -OutFile $f -UseBasicParsing
   Start-Process $f -ArgumentList '/quiet','InstallAllUsers=0','PrependPath=1','Include_test=0' -Wait
 }
+try{
 if(-not((Get-Command ffmpeg -ErrorAction SilentlyContinue) -or (Test-Path "$env:LOCALAPPDATA\ffmpeg\bin\ffmpeg.exe"))){
   Write-Host 'Instalando FFmpeg...'
   $f="$tmp\ffmpeg.zip"; Invoke-WebRequest https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip -OutFile $f -UseBasicParsing
@@ -16,4 +17,5 @@ if(-not((Get-Command ffmpeg -ErrorAction SilentlyContinue) -or (Test-Path "$env:
   Remove-Item "$env:LOCALAPPDATA\ffmpeg" -Recurse -Force -ErrorAction SilentlyContinue
   Move-Item $d.FullName "$env:LOCALAPPDATA\ffmpeg"
 }
+}catch{ Write-Host 'No pude bajar FFmpeg directo; uso la alternativa por pip.' }
 Write-Host 'Herramientas listas.'

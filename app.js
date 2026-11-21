@@ -60,8 +60,8 @@ async function poll(){
 if(!document.hidden){const s=await call("/status");
 if(!s){setPill("p-worker","","Worker apagado");setPill("p-yt","","Canal sin conectar");running=false;$("start").disabled=false}
 else{running=s.running;setPill("p-worker","ok","Worker conectado");
-setPill("p-yt",s.youtube?"ok":(s.watching?"wait":""),s.youtube?"Canal conectado":(s.watching?"Esperando tu inicio de sesión…":"Canal sin conectar"));
-$("log").textContent=s.log.length?s.log.join("\n"):"Sin actividad todavía.";$("log").scrollTop=1e9;$("start").disabled=s.running;
+setPill("p-yt",s.youtube?"ok":"",s.youtube?"Canal conectado":"Canal sin conectar");
+$("yt-detail").textContent=s.youtube?"":(s.detail||"");pubRender(s.items||[]);$("log").textContent=s.log.length?s.log.join("\n"):"Sin actividad todavía.";$("log").scrollTop=1e9;$("start").disabled=s.running;
 $("start").textContent=s.running?"Procesando…":"Comenzar ahora el proceso de edición ▶"}}
 setTimeout(poll,running?2500:7000)}
 const note=(t,err)=>{const m=$("ctl-msg");m.textContent=t;m.className="msg"+(err?" err":"")};
@@ -71,3 +71,8 @@ $("start").onclick=async()=>{if(!q.length)return note("La cola está vacía: agr
 const r=await call("/start",{config:cfg,items:q});if(!r)return note("No encuentro el worker. Ejecutá 2-INSTALAR-Y-EJECUTAR.bat y dejá la ventana abierta.",1);
 note(r.message,!r.ok);poll()};
 poll();
+
+const ST={pending:"En espera",processing:"Editando…",ready:"Listo (editado)",scheduled:"Programado en YouTube",error:"Error"};
+function pubRender(items){const el=$("pub");if(!items.length){el.innerHTML='<div class="empty">Todavía no hay videos procesados.</div>';return}
+el.innerHTML=items.map(x=>`<div class="pc">${x.type==="video"?`<img loading="lazy" src="https://i.ytimg.com/vi/${esc(x.id||"")}/mqdefault.jpg" alt="" onerror="this.style.visibility='hidden'">`:""}<div><b>${esc(x.title||x.url||"")}</b><span class="st ${esc(x.status||"")}">${ST[x.status]||esc(x.status||"")}</span><small>${x.kind==="short"?"Short":"Video"}${x.publishAt?" · "+new Date(x.publishAt).toLocaleString("es",{dateStyle:"medium",timeStyle:"short"}):""}</small>${x.error?`<small>${esc(x.error)}</small>`:""}</div></div>`).join("")}
+$("force").onclick=async()=>{const r=await call("/forzar",{});note(r?r.message:"No encuentro el worker.",!r);poll()};

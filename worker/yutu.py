@@ -1,9 +1,21 @@
 """Yutu worker: descarga -> recorte -> subtitulos -> subida a YouTube Studio (sin Google Cloud)."""
-import json, subprocess, sys, time, pathlib, datetime as dt
+import json, os, shutil, subprocess, sys, time, pathlib, datetime as dt
 ROOT = pathlib.Path(__file__).parent
 MEDIA = ROOT / "media"; MEDIA.mkdir(exist_ok=True)
 QF = ROOT / "queue.json"
 NO_UPLOAD = "--sin-subir" in sys.argv
+
+def find_ffmpeg():
+    p = shutil.which("ffmpeg")
+    if p: return p
+    c = pathlib.Path(os.environ.get("LOCALAPPDATA", "")) / "ffmpeg" / "bin" / "ffmpeg.exe"
+    if c.exists(): return str(c)
+    try:
+        import imageio_ffmpeg
+        return imageio_ffmpeg.get_ffmpeg_exe()
+    except Exception:
+        return None
+FFMPEG = find_ffmpeg()
 
 def run(*a, **k): return subprocess.run([str(x) for x in a], check=True, **k)
 def load(): return json.loads(QF.read_text("utf-8"))
@@ -37,16 +49,18 @@ def subtitles(clip, lang, short):
     return srt
 
 def process(it, cfg):
+    if not FFMPEG: raise RuntimeError("No encuentro FFmpeg. Cierra el worker y ejecuta 2-INSTALAR-Y-EJECUTAR.bat de nuevo.")
     vid = it["id"]; src = MEDIA / f"{vid}.mp4"
     info = json.loads(run("yt-dlp", "-j", "--no-playlist", it["url"], capture_output=True, text=True).stdout)
     it["title"] = info["title"][:90]; dur = info.get("duration") or 60
     if not src.exists():
-        run("yt-dlp", "--no-progress", "-f", "bv*[height<=1080]+ba/b", "--merge-output-format", "mp4",
+        run("yt-dlp", "--no-progress", "--ffmpeg-location", FFMPEG,
+            "-f", "bv*[height<=1080][ext=mp4]+ba[ext=m4a]/bv*[height<=1080]+ba/b", "--merge-output-format", "mp4",
             "--no-playlist", "-o", MEDIA / f"{vid}.%(ext)s", it["url"])
     short = it["kind"] == "short"; clip = MEDIA / f"{vid}_clip.mp4"
     if short:
         start = 0 if dur <= 58 else dur * 0.1
-        run("ffmpeg", "-loglevel", "error", "-y", "-ss", start, "-t", 58, "-i", src,
+        run(FFMPEG, "-loglevel", "error", "-y", "-ss", start, "-t", 58, "-i", src,
             "-vf", "crop=ih*9/16:ih,scale=1080:1920", "-c:v", "libx264", "-preset", "fast", "-crf", 21,
             "-c:a", "aac", clip)
     else:
@@ -55,7 +69,7 @@ def process(it, cfg):
     if cfg.get("sub", True):
         srt = subtitles(clip, cfg.get("lang", "es"), short)
         style = "Alignment=2,FontSize=%d,Outline=2,Bold=1,MarginV=%d" % ((16, 90) if short else (20, 30))
-        run("ffmpeg", "-loglevel", "error", "-y", "-i", clip.name, "-vf", f"subtitles={srt.name}:force_style='{style}'",
+        run(FFMPEG, "-loglevel", "error", "-y", "-i", clip.name, "-vf", f"subtitles={srt.name}:force_style='{style}'",
             "-c:v", "libx264", "-preset", "fast", "-crf", 21, "-c:a", "copy", final.name, cwd=MEDIA)
     else:
         clip.replace(final)
@@ -130,7 +144,8 @@ def main():
     d = load(); d.setdefault("config", {}); expand(d); save(d)
     for it in d["items"]:
         try:
-            if it["status"] == "pending":
+            if it["status"] in ("pending", "processing"):
+                it["status"] = "processing"; it.pop("error", None); save(d)
                 print("Procesando", it["url"]); process(it, d["config"]); save(d)
         except Exception as e:
             it["status"] = "error"; it["error"] = str(e)[:300]; save(d); print("ERROR:", e)

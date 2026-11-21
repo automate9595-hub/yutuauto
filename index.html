@@ -3,7 +3,7 @@
 <title>Yutu Studio — Automatización de video</title><link rel="stylesheet" href="styles.css"></head>
 <body><div id="splash"><div class="sp-mark">Y</div><div class="sp-bar"><i></i></div></div>
 <header class="nav"><a class="brand" href="#top"><span class="mark">Y</span>Yutu <b>Studio</b></a>
-<nav><a href="#importar">Importar</a><a href="#cola">Cola</a><a href="#control">Ejecutar</a><a href="#auto">Automatización</a><a href="#flujo">Flujo</a></nav></header>
+<nav><a href="#importar">Importar</a><a href="#cola">Cola</a><a href="#control">Ejecutar</a><a href="#publicados">Publicaciones</a><a href="#auto">Automatización</a><a href="#flujo">Flujo</a></nav></header>
 <main id="top">
 <section class="hero"><div><span class="chip">● Panel de producción</span><h1>Pegá links. <em>Publicá solo.</em></h1>
 <p>Armá tu cola, definí cuántos Shorts y videos salen por día y dejá que el worker descargue, recorte, subtitule y programe todo en tu canal.</p>
@@ -21,10 +21,14 @@
 <div class="grid2"><div class="card pad ctl">
 <div class="pill-row"><span class="pill" id="p-worker"><i></i>Worker en tu PC</span><span class="pill" id="p-yt"><i></i>Canal de YouTube</span></div>
 <button class="btn ghost" id="connect">Conectar con mi canal de YouTube ▷</button>
+<button class="btn ghost sm" id="force">Ya inicié sesión en Studio: marcar como conectado</button><div id="yt-detail" class="sub"></div>
 <button class="btn pri big" id="start">Comenzar ahora el proceso de edición ▶</button>
 <div id="ctl-msg" class="msg"></div>
 <p class="sub">Primero ejecutá <code>worker\2-INSTALAR-Y-EJECUTAR.bat</code> y dejá esa ventana abierta.</p></div>
 <div class="card pad"><h3>Progreso</h3><pre id="log" class="log">Esperando al worker...</pre></div></div></section>
+
+<section id="publicados"><div class="head"><span class="chip">VISTA PREVIA</span><h2>Publicaciones</h2><p>Estado de cada video: en espera, editando, listo o programado.</p></div>
+<div id="pub" class="pub"><div class="empty">Todavía no hay videos procesados.</div></div></section>
 
 <section id="auto"><div class="head"><span class="chip">PASO 4</span><h2>Automatización</h2><p>Ritmo de publicación y subtítulos.</p></div>
 <div class="grid2"><div class="card pad cfg">
