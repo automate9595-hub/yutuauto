@@ -1,7 +1,11 @@
 const $=id=>document.getElementById(id),K="yutu-v2",C="yutu-cfg-v2";
 const load=(k,d)=>{try{return JSON.parse(localStorage.getItem(k))??d}catch{return d}};
 let q=load(K,[]);if(!Array.isArray(q))q=[];
-let cfg=Object.assign({sn:3,st:"09:00,14:00,20:00",vn:2,vt:"12:00,18:00",lang:"es",sub:true},load(C,{}));
+const DEF={sn:3,st:"09:00,14:00,20:00",vn:2,vt:"12:00,18:00",publish:"schedule",
+sub:true,lang:"es",model:"small",sub_pos:"bottom",sub_size:"m",sub_color:"white",sub_words:"",sub_caps:false,
+cut_mode:"auto",cut_start:0,short_len:58,frame:"crop",vid_trim:false,vid_start:0,vid_len:0,
+fx:"none",vivid:false,vignette:false,fade:false,loudnorm:false};
+let cfg=Object.assign({},DEF,load(C,{}));
 function parse(raw){try{const u=new URL(raw.trim()),h=u.hostname.replace(/^www\./,"").toLowerCase();
 if(!["youtube.com","m.youtube.com","music.youtube.com","youtu.be"].includes(h))return null;
 const l=u.searchParams.get("list");let v=null;
@@ -31,9 +35,9 @@ save();m.textContent=`Agregados ${a} · repetidos ${d} · no reconocidos ${i}`;m
 $("clr").onclick=()=>{$("links").value="";$("msg").textContent=""};
 $("empty").onclick=()=>{if(q.length&&confirm("¿Vaciar la cola?")){q=[];save()}};
 $("all-short").onclick=()=>{q.forEach(x=>x.kind="short");save()};$("all-video").onclick=()=>{q.forEach(x=>x.kind="video");save()};
-const F={sn:"c-sn",st:"c-st",vn:"c-vn",vt:"c-vt",lang:"c-lang"};
-for(const k in F){const el=$(F[k]);el.value=cfg[k];el.oninput=()=>{cfg[k]=el.type==="number"?Math.max(0,+el.value||0):el.value;localStorage.setItem(C,JSON.stringify(cfg));render()}}
-$("c-sub").checked=cfg.sub;$("c-sub").onchange=e=>{cfg.sub=e.target.checked;localStorage.setItem(C,JSON.stringify(cfg))};
+for(const k in DEF){const el=$("c-"+k);if(!el)continue;
+if(el.type==="checkbox"){el.checked=!!cfg[k];el.onchange=()=>{cfg[k]=el.checked;localStorage.setItem(C,JSON.stringify(cfg))}}
+else{el.value=cfg[k];el.oninput=()=>{cfg[k]=el.type==="number"?(el.value===""?"":Math.max(0,+el.value||0)):el.value;localStorage.setItem(C,JSON.stringify(cfg));render()}}}
 $("export").onclick=()=>{const b=new Blob([JSON.stringify({config:cfg,items:q},null,2)],{type:"application/json"});const a=document.createElement("a");a.href=URL.createObjectURL(b);a.download="yutu-studio-cola.json";a.click();URL.revokeObjectURL(a.href)};
 render();
 
@@ -48,7 +52,7 @@ function closeWin(){$("win").classList.remove("open");$("win").setAttribute("ari
 $("win").onclick=e=>{if(e.target===$("win")||e.target.dataset.close!==undefined)closeWin()};addEventListener("keydown",e=>{if(e.key==="Escape")closeWin()});
 $("list").addEventListener("click",e=>{if(e.target.closest("button"))return;const it=e.target.closest(".item");if(!it)return;const x=q.find(y=>y.key===it.querySelector("[data-r]").dataset.r);
 openWin(x.type==="playlist"?"Playlist":"Vista previa",(x.type==="video"?`<img src="https://i.ytimg.com/vi/${x.id}/hqdefault.jpg" alt="Miniatura" onerror="this.remove()">`:"")+`<p><b>Salida:</b> ${x.kind==="short"?"Short vertical 9:16":"Video completo"}</p><p class="sub" style="word-break:break-all">${esc(x.url)}</p>`)});
-$("open-guide").onclick=()=>openWin("Guía de activación",`<ol><li>Ejecutá <code>worker\\2-INSTALAR-Y-EJECUTAR.bat</code> y dejá la ventana abierta.</li><li>Tocá <b>Conectar con mi canal de YouTube</b> e iniciá sesión en el Chrome que se abre (solo una vez).</li><li>Tocá <b>Comenzar ahora el proceso de edición</b>.</li></ol><p class="sub">Esa sesión de Chrome es el permiso para publicar en tu canal.</p>`);
+$("open-guide").onclick=()=>openWin("Guía de activación",`<ol><li>Ejecutá <code>worker\\2-INSTALAR-Y-EJECUTAR.bat</code>; queda en segundo plano con un icono junto al wifi.</li><li>Tocá <b>Conectar con mi canal de YouTube</b> e iniciá sesión en el Chrome que se abre (solo una vez).</li><li>Configurá la edición y tocá <b>Comenzar proceso</b> (solo edita) o <b>Comenzar proceso, automatizar y subir ahora</b>.</li></ol><p class="sub">Esa sesión de Chrome es el permiso para publicar en tu canal.</p>`);
 
 /* worker local */
 const API="http://127.0.0.1:8765";
@@ -58,21 +62,22 @@ const setPill=(id,s,t)=>{const e=$(id);e.className="pill "+s;e.lastChild.textCon
 let running=false;
 async function poll(){
 if(!document.hidden){const s=await call("/status");
-if(!s){setPill("p-worker","","Worker apagado");setPill("p-yt","","Canal sin conectar");running=false;$("start").disabled=false}
+if(!s){setPill("p-worker","","Worker apagado");setPill("p-yt","","Canal sin conectar");running=false;$("start").disabled=$("start-up").disabled=false}
 else{running=s.running;setPill("p-worker","ok","Worker conectado");
 setPill("p-yt",s.youtube?"ok":"",s.youtube?"Canal conectado":"Canal sin conectar");
-$("yt-detail").textContent=s.youtube?"":(s.detail||"");pubRender(s.items||[]);$("log").textContent=s.log.length?s.log.join("\n"):"Sin actividad todavía.";$("log").scrollTop=1e9;$("start").disabled=s.running;
-$("start").textContent=s.running?"Procesando…":"Comenzar ahora el proceso de edición ▶"}}
+$("yt-detail").textContent=s.youtube?"":(s.detail||"");pubRender(s.items||[]);$("log").textContent=s.log.length?s.log.join("\n"):"Sin actividad todavía.";$("log").scrollTop=1e9;$("start").disabled=$("start-up").disabled=s.running;
+$("start").textContent=s.running?"Procesando…":"Comenzar proceso (solo editar) ▶";$("start-up").textContent=s.running?"Procesando…":"Comenzar proceso, automatizar y subir ahora ⚡"}}
 setTimeout(poll,running?2500:7000)}
 const note=(t,err)=>{const m=$("ctl-msg");m.textContent=t;m.className="msg"+(err?" err":"")};
-$("connect").onclick=async()=>{const r=await call("/connect",{});if(!r)return note("No encuentro el worker. Ejecutá 2-INSTALAR-Y-EJECUTAR.bat y dejá la ventana abierta.",1);
+$("connect").onclick=async()=>{const r=await call("/connect",{});if(!r)return note("No encuentro el worker. Ejecutá 2-INSTALAR-Y-EJECUTAR.bat.",1);
 note(r.message||"Iniciá sesión en YouTube en el Chrome que se abrió.");poll()};
-$("start").onclick=async()=>{if(!q.length)return note("La cola está vacía: agregá links primero.",1);
-const r=await call("/start",{config:cfg,items:q});if(!r)return note("No encuentro el worker. Ejecutá 2-INSTALAR-Y-EJECUTAR.bat y dejá la ventana abierta.",1);
+const go=async upload=>{if(!q.length)return note("La cola está vacía: agregá links primero.",1);
+const r=await call("/start",{config:cfg,items:q,upload,reedit:$("reedit").checked});if(!r)return note("No encuentro el worker. Ejecutá 2-INSTALAR-Y-EJECUTAR.bat.",1);
 note(r.message,!r.ok);poll()};
+$("start").onclick=()=>go(false);$("start-up").onclick=()=>go(true);
 poll();
 
-const ST={pending:"En espera",processing:"Editando…",ready:"Listo (editado)",scheduled:"Programado en YouTube",error:"Error"};
+const ST={pending:"En espera",processing:"Editando…",ready:"Listo (editado)",scheduled:"Programado en YouTube",published:"Publicado",error:"Error"};
 function pubRender(items){const el=$("pub");if(!items.length){el.innerHTML='<div class="empty">Todavía no hay videos procesados.</div>';return}
 el.innerHTML=items.map(x=>`<div class="pc">${x.type==="video"?`<img loading="lazy" src="https://i.ytimg.com/vi/${esc(x.id||"")}/mqdefault.jpg" alt="" onerror="this.style.visibility='hidden'">`:""}<div><b>${esc(x.title||x.url||"")}</b><span class="st ${esc(x.status||"")}">${ST[x.status]||esc(x.status||"")}</span><small>${x.kind==="short"?"Short":"Video"}${x.publishAt?" · "+new Date(x.publishAt).toLocaleString("es",{dateStyle:"medium",timeStyle:"short"}):""}</small>${x.error?`<small>${esc(x.error)}</small>`:""}</div></div>`).join("")}
 $("force").onclick=async()=>{const r=await call("/forzar",{});note(r?r.message:"No encuentro el worker.",!r);poll()};

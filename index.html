@@ -3,7 +3,7 @@
 <title>Yutu Studio — Automatización de video</title><link rel="stylesheet" href="styles.css"></head>
 <body><div id="splash"><div class="sp-mark">Y</div><div class="sp-bar"><i></i></div></div>
 <header class="nav"><a class="brand" href="#top"><span class="mark">Y</span>Yutu <b>Studio</b></a>
-<nav><a href="#importar">Importar</a><a href="#cola">Cola</a><a href="#control">Ejecutar</a><a href="#publicados">Publicaciones</a><a href="#auto">Automatización</a><a href="#flujo">Flujo</a></nav></header>
+<nav><a href="#importar">Importar</a><a href="#cola">Cola</a><a href="#edicion">Edición</a><a href="#control">Ejecutar</a><a href="#publicados">Publicaciones</a><a href="#auto">Automatización</a><a href="#flujo">Flujo</a></nav></header>
 <main id="top">
 <section class="hero"><div><span class="chip">● Panel de producción</span><h1>Pegá links. <em>Publicá solo.</em></h1>
 <p>Armá tu cola, definí cuántos Shorts y videos salen por día y dejá que el worker descargue, recorte, subtitule y programe todo en tu canal.</p>
@@ -17,31 +17,60 @@
 <section id="cola"><div class="head"><span class="chip">PASO 2</span><h2>Cola de trabajo</h2><p>Elegí si cada link sale como Short (vertical, ≤58 s) o como video normal.</p></div>
 <div class="card"><div class="bar"><b id="qcount">0 elementos</b><div class="row"><button class="btn ghost sm" id="all-short">Todos Shorts</button><button class="btn ghost sm" id="all-video">Todos Videos</button><button class="btn ghost sm danger" id="empty">Vaciar</button></div></div><div id="list"></div></div></section>
 
-<section id="control"><div class="head"><span class="chip">PASO 3</span><h2>Conectar y ejecutar</h2><p>Conectá tu canal y empezá la edición en el momento.</p></div>
+<section id="edicion"><div class="head"><span class="chip">PASO 3</span><h2>Edición del video</h2><p>Configurá qué le hace el worker a cada video antes de ejecutar.</p></div>
+<div class="egrid">
+<div class="card pad cfg"><h3>Subtítulos</h3>
+<label class="chk"><input id="c-sub" type="checkbox"> Quemar subtítulos en el video</label>
+<label>Idioma<select id="c-lang"><option value="es">Español</option><option value="en">Inglés</option><option value="auto">Detectar</option></select></label>
+<label>Precisión (modelo)<select id="c-model"><option value="tiny">Rápido (tiny)</option><option value="base">Equilibrado (base)</option><option value="small">Preciso (small)</option></select></label>
+<label>Posición<select id="c-sub_pos"><option value="bottom">Abajo</option><option value="middle">Centro</option><option value="top">Arriba</option></select></label>
+<label>Tamaño<select id="c-sub_size"><option value="s">Pequeño</option><option value="m">Mediano</option><option value="l">Grande</option></select></label>
+<label>Color<select id="c-sub_color"><option value="white">Blanco</option><option value="yellow">Amarillo</option><option value="green">Verde</option></select></label>
+<label>Palabras por línea<input id="c-sub_words" type="number" min="1" max="12" placeholder="Auto"></label>
+<label class="chk"><input id="c-sub_caps" type="checkbox"> TODO EN MAYÚSCULAS</label></div>
+<div class="card pad cfg"><h3>Recorte</h3>
+<label>Shorts: qué tramo usar<select id="c-cut_mode"><option value="auto">Automático (desde el 10 %)</option><option value="inicio">Desde el inicio</option><option value="manual">Segundo exacto</option></select></label>
+<label>Shorts: segundo de inicio<input id="c-cut_start" type="number" min="0"></label>
+<label>Shorts: duración (máx. 60 s)<input id="c-short_len" type="number" min="5" max="60"></label>
+<label>Shorts: encuadre vertical<select id="c-frame"><option value="crop">Recorte al centro</option><option value="blur">Completo con fondo difuminado</option></select></label>
+<label class="chk"><input id="c-vid_trim" type="checkbox"> Recortar también los videos largos</label>
+<label>Videos: inicio (segundos)<input id="c-vid_start" type="number" min="0"></label>
+<label>Videos: duración máxima (minutos, 0 = hasta el final)<input id="c-vid_len" type="number" min="0"></label></div>
+<div class="card pad cfg"><h3>Cámara y efectos</h3>
+<label>Movimiento de cámara<select id="c-fx"><option value="none">Ninguno</option><option value="zoom">Zoom que respira</option><option value="zoomin">Zoom lento hacia adentro</option><option value="handheld">Cámara en mano</option></select></label>
+<label class="chk"><input id="c-vivid" type="checkbox"> Color vivo y nitidez</label>
+<label class="chk"><input id="c-vignette" type="checkbox"> Viñeta</label>
+<label class="chk"><input id="c-fade" type="checkbox"> Fundido de entrada y salida</label>
+<label class="chk"><input id="c-loudnorm" type="checkbox"> Normalizar volumen</label>
+<p class="sub">Todo se aplica en una sola pasada de FFmpeg. Los efectos de cámara recodifican el video, así que tardan más.</p></div>
+</div></section>
+
+<section id="control"><div class="head"><span class="chip">PASO 4</span><h2>Conectar y ejecutar</h2><p>Conectá tu canal y empezá la edición en el momento.</p></div>
 <div class="grid2"><div class="card pad ctl">
 <div class="pill-row"><span class="pill" id="p-worker"><i></i>Worker en tu PC</span><span class="pill" id="p-yt"><i></i>Canal de YouTube</span></div>
 <button class="btn ghost" id="connect">Conectar con mi canal de YouTube ▷</button>
 <button class="btn ghost sm" id="force">Ya inicié sesión en Studio: marcar como conectado</button><div id="yt-detail" class="sub"></div>
-<button class="btn pri big" id="start">Comenzar ahora el proceso de edición ▶</button>
+<label class="chk"><input id="reedit" type="checkbox"> Volver a editar los que ya estaban listos (por si cambiaste la edición)</label>
+<button class="btn ghost big" id="start">Comenzar proceso (solo editar) ▶</button>
+<button class="btn pri big" id="start-up">Comenzar proceso, automatizar y subir ahora ⚡</button>
 <div id="ctl-msg" class="msg"></div>
-<p class="sub">Primero ejecutá <code>worker\2-INSTALAR-Y-EJECUTAR.bat</code> y dejá esa ventana abierta.</p></div>
+<p class="sub">Primero ejecutá <code>worker\2-INSTALAR-Y-EJECUTAR.bat</code>: queda en segundo plano con un icono junto al wifi y la bateria.</p></div>
 <div class="card pad"><h3>Progreso</h3><pre id="log" class="log">Esperando al worker...</pre></div></div></section>
 
 <section id="publicados"><div class="head"><span class="chip">VISTA PREVIA</span><h2>Publicaciones</h2><p>Estado de cada video: en espera, editando, listo o programado.</p></div>
 <div id="pub" class="pub"><div class="empty">Todavía no hay videos procesados.</div></div></section>
 
-<section id="auto"><div class="head"><span class="chip">PASO 4</span><h2>Automatización</h2><p>Ritmo de publicación y subtítulos.</p></div>
+<section id="auto"><div class="head"><span class="chip">PASO 5</span><h2>Automatización</h2><p>Ritmo y modo de publicación.</p></div>
 <div class="grid2"><div class="card pad cfg">
 <label>Shorts por día<input id="c-sn" type="number" min="0" max="6"></label>
 <label>Horarios Shorts<input id="c-st" placeholder="09:00,14:00,20:00"></label>
 <label>Videos por día<input id="c-vn" type="number" min="0" max="6"></label>
 <label>Horarios Videos<input id="c-vt" placeholder="12:00,18:00"></label>
-<label>Idioma de subtítulos<select id="c-lang"><option value="es">Español</option><option value="en">Inglés</option><option value="auto">Detectar</option></select></label>
-<label class="chk"><input id="c-sub" type="checkbox"> Subtítulos quemados en el video</label>
+<label>Al subir a YouTube<select id="c-publish"><option value="schedule">Programar según los horarios</option><option value="now">Publicar de inmediato</option></select></label>
 <button class="btn ghost" id="open-guide">Abrir guía de activación ◧</button><button class="btn pri" id="export">Exportar cola para el worker ↓</button></div>
 <div class="card pad"><h3>Calendario previsto</h3><div id="sched" class="sched"></div></div></div></section>
 
-<section id="flujo"><div class="head"><span class="chip">FLUJO</span><h2>Qué hace el worker</h2><p>Corre en tu PC con <code>2-INSTALAR-Y-EJECUTAR.bat</code>: GitHub Pages solo muestra este panel.</p></div>
+<section id="flujo"><div class="head"><span class="chip">FLUJO</span><h2>Qué hace el worker</h2><p>Corre en segundo plano en tu PC con <code>2-INSTALAR-Y-EJECUTAR.bat</code>: GitHub Pages solo muestra este panel.</p></div>
 <div class="steps"><div class="card step"><i>1</i><b>Descarga</b><p>yt-dlp baja video o playlist.</p></div><div class="card step"><i>2</i><b>Recorte</b><p>Short: 58 s en 9:16. Video: completo.</p></div><div class="card step"><i>3</i><b>Subtítulos</b><p>Whisper transcribe y los quema.</p></div><div class="card step"><i>4</i><b>Publica</b><p>Sube y programa por la API de YouTube.</p></div></div>
 <div class="card pad note"><b>Usá contenido tuyo o con permiso.</b> Resubir videos ajenos viola los términos de YouTube y suele terminar en strikes o monetización denegada.</div></section>
 </main><div id="win" class="win-back" aria-hidden="true"><div class="win" role="dialog" aria-modal="true"><div class="win-bar"><span class="d r" data-close></span><span class="d y" data-close></span><span class="d g"></span><b id="win-title"></b></div><div id="win-body" class="win-body"></div></div></div>

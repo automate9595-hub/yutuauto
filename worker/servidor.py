@@ -6,9 +6,25 @@ ALLOWED = {"https://automate9595-hub.github.io", "http://localhost", "http://127
 ENV = dict(os.environ, PYTHONIOENCODING="utf-8", HF_HUB_DISABLE_PROGRESS_BARS="1")
 state = {"youtube": False, "running": False, "detail": ""}
 LOG = []
+PROC = None
+NOTIFY = lambda title, msg: None      # la bandeja lo reemplaza para mostrar avisos
+NOWIN = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 
 def log(s):
     LOG.append(str(s).rstrip()[:300]); del LOG[:-200]
+    try: print(str(s).rstrip()[:300], flush=True)
+    except Exception: pass
+
+def py_exe():
+    """python.exe (no pythonw) para que los procesos hijos tengan stdout."""
+    p = pathlib.Path(sys.executable)
+    q = p.with_name("python.exe")
+    return str(q) if p.name.lower() == "pythonw.exe" and q.exists() else sys.executable
+
+def stop_all():
+    try:
+        if PROC and PROC.poll() is None: PROC.terminate()
+    except Exception: pass
 
 def chrome_path():
     pf, pf86, la = (os.environ.get(k, "") for k in ("ProgramFiles", "ProgramFiles(x86)", "LOCALAPPDATA"))
@@ -61,24 +77,29 @@ def queue_items():
     except Exception:
         return []
 
-def merge_queue(data):
+def merge_queue(data, reedit=False):
     qf = ROOT / "queue.json"; old = {}
     if qf.exists():
         try: old = {i["key"]: i for i in json.loads(qf.read_text("utf-8")).get("items", [])}
         except Exception: pass
-    items = [old[i["key"]] if i.get("key") in old and old[i["key"]].get("status") in ("ready", "scheduled") else i for i in data["items"]]
+    keep = ("scheduled", "published") if reedit else ("ready", "scheduled", "published")
+    items = [old[i["key"]] if i.get("key") in old and old[i["key"]].get("status") in keep else i for i in data["items"]]
     qf.write_text(json.dumps({"config": data.get("config", {}), "items": items}, indent=2, ensure_ascii=False), "utf-8")
 
 def run_job(no_upload):
+    global PROC
     state["running"] = True; log("== Comenzando proceso ==")
     try:
-        proc = subprocess.Popen([sys.executable, "-u", "yutu.py"] + (["--sin-subir"] if no_upload else []), cwd=ROOT, env=ENV,
-                                stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding="utf-8", errors="replace")
-        for line in proc.stdout: log(line)
-        proc.wait()
+        PROC = subprocess.Popen([py_exe(), "-u", "yutu.py"] + (["--sin-subir"] if no_upload else []), cwd=ROOT, env=ENV,
+                                stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding="utf-8", errors="replace",
+                                creationflags=NOWIN)
+        for line in PROC.stdout: log(line)
+        PROC.wait()
     except Exception as e:
         log(f"ERROR: {e}")
     state["running"] = False; log("== Proceso terminado ==")
+    try: NOTIFY("Yutu Worker", "Proceso terminado. Revisa el panel.")
+    except Exception: pass
 
 class H(BaseHTTPRequestHandler):
     def log_message(self, *a): pass
@@ -109,14 +130,18 @@ class H(BaseHTTPRequestHandler):
         if self.path == "/start":
             if state["running"]: return self._send({"ok": False, "message": "Ya hay un proceso en marcha."})
             if not data.get("items"): return self._send({"ok": False, "message": "La cola esta vacia."})
-            merge_queue(data)
-            no_up = not launch_chrome()
-            if no_up: log("Sin Chrome/Edge: solo preparo los videos.")
+            merge_queue(data, bool(data.get("reedit")))
+            want_up = bool(data.get("upload"))
+            no_up = (not want_up) or (not launch_chrome())
+            if want_up and no_up: log("Sin Chrome/Edge: solo preparo los videos.")
             threading.Thread(target=run_job, args=(no_up,), daemon=True).start()
-            return self._send({"ok": True, "message": "Proceso iniciado."})
+            return self._send({"ok": True, "message": "Editando y subiendo..." if not no_up else "Editando (sin subir)..."})
         self._send({"ok": False}, 404)
+
+def serve():
+    ThreadingHTTPServer(("127.0.0.1", 8765), H).serve_forever()
 
 if __name__ == "__main__":
     print("Worker listo en http://127.0.0.1:8765 - vuelve a la web y usa los botones.")
     print("No cierres esta ventana.")
-    ThreadingHTTPServer(("127.0.0.1", 8765), H).serve_forever()
+    serve()
