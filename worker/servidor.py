@@ -2,6 +2,7 @@
 import json, os, pathlib, socket, subprocess, sys, threading, time, urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 ROOT = pathlib.Path(__file__).parent
+MEDIA = ROOT / "media"
 ALLOWED = {"https://automate9595-hub.github.io", "http://localhost", "http://127.0.0.1"}
 ENV = dict(os.environ, PYTHONIOENCODING="utf-8", HF_HUB_DISABLE_PROGRESS_BARS="1")
 state = {"youtube": False, "running": False, "detail": ""}
@@ -70,12 +71,42 @@ def refresh_login():
         hosts = ", ".join(sorted({x.get("url", "").split("/")[2] for x in pages if x.get("url", "").count("/") >= 2})) or "ninguna"
         state["detail"] = "Chrome abierto, pero no veo YouTube Studio con tu canal. Pestanas: " + hosts
 
+_LAST_ITEMS = []
 def queue_items():
+    global _LAST_ITEMS
     try:
         d = json.loads((ROOT / "queue.json").read_text("utf-8"))
-        return [{k: i.get(k) for k in ("id", "type", "kind", "title", "status", "publishAt", "error", "url")} for i in d.get("items", [])]
+        _LAST_ITEMS = [dict({k: i.get(k) for k in ("id", "key", "type", "kind", "title", "status", "publishAt", "error", "url", "pct", "stage", "est")},
+                            hasfile=bool(i.get("id") and (MEDIA / f"{i['id']}_final.mp4").exists())) for i in d.get("items", [])]
     except Exception:
-        return []
+        pass
+    return _LAST_ITEMS
+
+def write_queue(d):
+    qf = ROOT / "queue.json"; tmp = qf.with_suffix(".tmp")
+    tmp.write_text(json.dumps(d, indent=2, ensure_ascii=False), "utf-8"); os.replace(tmp, qf)
+
+def read_queue():
+    try: return json.loads((ROOT / "queue.json").read_text("utf-8"))
+    except Exception: return None
+
+def request_cancel(key=None, all_=False):
+    """Pide cancelar. Si hay proceso en marcha lo ve el worker; si no, se marca directamente."""
+    cf = ROOT / "cancel.json"
+    try: c = json.loads(cf.read_text("utf-8"))
+    except Exception: c = {}
+    if all_: c["all"] = True
+    elif key and key not in c.setdefault("keys", []): c["keys"].append(key)
+    cf.write_text(json.dumps(c), "utf-8")
+    if not state["running"]:
+        d = read_queue()
+        if d:
+            for i in d.get("items", []):
+                if i.get("status") in ("pending", "processing", "uploading") and (all_ or i.get("key") == key):
+                    i["status"] = "cancelled"; i["stage"] = "Cancelado"
+            write_queue(d)
+        try: cf.unlink()
+        except Exception: pass
 
 def merge_queue(data, reedit=False):
     qf = ROOT / "queue.json"; old = {}
@@ -84,13 +115,13 @@ def merge_queue(data, reedit=False):
         except Exception: pass
     keep = ("scheduled", "published") if reedit else ("ready", "scheduled", "published")
     items = [old[i["key"]] if i.get("key") in old and old[i["key"]].get("status") in keep else i for i in data["items"]]
-    qf.write_text(json.dumps({"config": data.get("config", {}), "items": items}, indent=2, ensure_ascii=False), "utf-8")
+    write_queue({"config": data.get("config", {}), "items": items})
 
-def run_job(no_upload):
+def run_job(extra):
     global PROC
     state["running"] = True; log("== Comenzando proceso ==")
     try:
-        PROC = subprocess.Popen([py_exe(), "-u", "yutu.py"] + (["--sin-subir"] if no_upload else []), cwd=ROOT, env=ENV,
+        PROC = subprocess.Popen([py_exe(), "-u", "yutu.py"] + extra, cwd=ROOT, env=ENV,
                                 stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding="utf-8", errors="replace",
                                 creationflags=NOWIN)
         for line in PROC.stdout: log(line)
@@ -98,6 +129,8 @@ def run_job(no_upload):
     except Exception as e:
         log(f"ERROR: {e}")
     state["running"] = False; log("== Proceso terminado ==")
+    try: (ROOT / "cancel.json").unlink()
+    except Exception: pass
     try: NOTIFY("Yutu Worker", "Proceso terminado. Revisa el panel.")
     except Exception: pass
 
@@ -114,7 +147,34 @@ class H(BaseHTTPRequestHandler):
     def do_OPTIONS(self): self._send({})
     def _bad_origin(self):
         o = self.headers.get("Origin", ""); return bool(o) and o not in ALLOWED
+    def _media(self):
+        import re as _re
+        m = _re.fullmatch(r"/media/([\w-]{11})_final\.mp4", self.path.split("?")[0])
+        ref = self.headers.get("Referer", "")
+        if not m or (ref and not any(ref.startswith(o) for o in ALLOWED)): return self._send({"ok": False}, 404)
+        f = MEDIA / f"{m.group(1)}_final.mp4"
+        if not f.exists(): return self._send({"ok": False}, 404)
+        size = f.stat().st_size; a, b = 0, size - 1
+        rg = _re.match(r"bytes=(\d*)-(\d*)", self.headers.get("Range", ""))
+        if rg:
+            if rg.group(1): a = int(rg.group(1))
+            if rg.group(2): b = min(int(rg.group(2)), size - 1)
+            if not rg.group(1) and rg.group(2): a, b = max(size - int(rg.group(2)), 0), size - 1
+        self.send_response(206 if rg else 200)
+        self.send_header("Content-Type", "video/mp4"); self.send_header("Accept-Ranges", "bytes")
+        self.send_header("Content-Length", str(b - a + 1))
+        if rg: self.send_header("Content-Range", f"bytes {a}-{b}/{size}")
+        self.end_headers()
+        try:
+            with open(f, "rb") as fh:
+                fh.seek(a); left = b - a + 1
+                while left > 0:
+                    chunk = fh.read(min(65536, left))
+                    if not chunk: break
+                    self.wfile.write(chunk); left -= len(chunk)
+        except Exception: pass
     def do_GET(self):
+        if self.path.startswith("/media/"): return self._media()
         if self._bad_origin(): return self._send({"ok": False}, 403)
         refresh_login()
         self._send({"ok": True, **state, "log": LOG[-40:], "items": queue_items()})
@@ -130,12 +190,29 @@ class H(BaseHTTPRequestHandler):
         if self.path == "/start":
             if state["running"]: return self._send({"ok": False, "message": "Ya hay un proceso en marcha."})
             if not data.get("items"): return self._send({"ok": False, "message": "La cola esta vacia."})
+            try: (ROOT / "cancel.json").unlink()
+            except Exception: pass
             merge_queue(data, bool(data.get("reedit")))
             want_up = bool(data.get("upload"))
             no_up = (not want_up) or (not launch_chrome())
             if want_up and no_up: log("Sin Chrome/Edge: solo preparo los videos.")
-            threading.Thread(target=run_job, args=(no_up,), daemon=True).start()
+            threading.Thread(target=run_job, args=(["--sin-subir"] if no_up else [],), daemon=True).start()
             return self._send({"ok": True, "message": "Editando y subiendo..." if not no_up else "Editando (sin subir)..."})
+        if self.path == "/cancel":
+            request_cancel(data.get("key"), bool(data.get("all")))
+            return self._send({"ok": True, "message": "Cancelando..." if state["running"] else "Cancelado."})
+        if self.path == "/upload":
+            if state["running"]: return self._send({"ok": False, "message": "Ya hay un proceso en marcha. Esperá a que termine o cancelalo."})
+            d = read_queue(); key = data.get("key") or "ALL"
+            ready = [i for i in (d or {}).get("items", []) if i.get("status") == "ready" and (key == "ALL" or i.get("key") == key)]
+            if not ready: return self._send({"ok": False, "message": "No hay videos editados listos para subir."})
+            if data.get("config"): d["config"] = data["config"]; write_queue(d)
+            if not launch_chrome(): return self._send({"ok": False, "message": "No pude abrir Chrome/Edge para subir."})
+            try: (ROOT / "cancel.json").unlink()
+            except Exception: pass
+            mode = "now" if data.get("mode") == "now" else "schedule"
+            threading.Thread(target=run_job, args=(["--subir", key, "--modo", mode],), daemon=True).start()
+            return self._send({"ok": True, "message": f"Subiendo {len(ready)} video(s) " + ("ahora." if mode == "now" else "con programación.")})
         self._send({"ok": False}, 404)
 
 def serve():
