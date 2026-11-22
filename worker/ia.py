@@ -4,7 +4,7 @@ Regla de oro: la IA SOLO sugiere. Todo se valida y, si una IA falla, tarda o res
 se prueba con la otra y, si tampoco, la edicion sigue con tu configuracion normal.
 Las claves viven solo en claves-ia.json (esta carpeta). No se suben a GitHub ni salen en la web.
 """
-import json, os, pathlib, re, urllib.error, urllib.request
+import json, os, pathlib, re, time, urllib.error, urllib.request
 import efectos
 
 ROOT = pathlib.Path(__file__).parent
@@ -46,20 +46,28 @@ def _http(url, body=None, headers=None):
     except urllib.error.HTTPError as e:
         raise RuntimeError(f"HTTP {e.code} {e.read().decode('utf-8', 'replace')[:160]}")
 
+MODELOS_GEMINI = ["gemini-flash-latest", "gemini-2.5-flash", "gemini-2.5-flash-lite"]
+
 def _gemini(prompt, d):
-    model = d.get("modelo_gemini") or "gemini-flash-latest"
     cuerpo = {"contents": [{"role": "user", "parts": [{"text": prompt}]}],
               "generationConfig": {"temperature": 0.4, "responseMimeType": "application/json"}}
-    try:
-        r = _http(f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent", cuerpo, {"x-goog-api-key": d["gemini"]})
-    except RuntimeError as e1:
-        if d["gemini"].startswith("AIza"): raise                      # clave normal de AI Studio: el error es real
-        try:                                                          # claves "AQ." = Vertex AI (modo express)
-            r = _http("https://aiplatform.googleapis.com/v1/publishers/google/models/gemini-2.5-flash:generateContent",
-                      cuerpo, {"x-goog-api-key": d["gemini"]})
-        except RuntimeError as e2:
-            raise RuntimeError(f"AI Studio: {str(e1)[:70]} | Vertex: {str(e2)[:70]}")
-    return "".join(p.get("text", "") for p in r["candidates"][0]["content"]["parts"])
+    hdr = {"x-goog-api-key": d["gemini"]}; ultimo = RuntimeError("Gemini no respondió")
+    for modelo in ([d["modelo_gemini"]] if d.get("modelo_gemini") else MODELOS_GEMINI):
+        for intento in range(2):
+            try:
+                r = _http(f"https://generativelanguage.googleapis.com/v1beta/models/{modelo}:generateContent", cuerpo, hdr)
+                return "".join(p.get("text", "") for p in r["candidates"][0]["content"]["parts"])
+            except RuntimeError as e:
+                ultimo = e; m = str(e)
+                if re.search(r"HTTP (503|500|429)", m): time.sleep(2 * (intento + 1)); continue   # saturado: reintenta y luego otro modelo
+                if "HTTP 404" in m: break                                                       # ese modelo ya no existe: siguiente
+                if re.search(r"HTTP (400|401|403)", m) and not d["gemini"].startswith("AIza"):
+                    try:                                                                         # claves "AQ." pueden ser de Vertex
+                        r = _http("https://aiplatform.googleapis.com/v1/publishers/google/models/gemini-2.5-flash:generateContent", cuerpo, hdr)
+                        return "".join(p.get("text", "") for p in r["candidates"][0]["content"]["parts"])
+                    except RuntimeError as e2: raise RuntimeError(f"{str(e)[:80]} | Vertex: {str(e2)[:80]}")
+                raise
+    raise ultimo
 
 def _elegir_grok(d):
     if d.get("modelo_grok"): return d["modelo_grok"]
@@ -93,6 +101,25 @@ def _json(txt):
     return json.loads(txt[a:b + 1])
 
 # ---------- el interruptor
+_CAIDAS = set()      # proveedores con clave invalida o sin credito: se saltan el resto de esta edicion
+
+def _explicar(p, e):
+    m, n = str(e), NOMBRE[p]
+    if re.search(r"credit balance|billing", m, re.I):
+        return f"{n}: la clave es válida pero la cuenta no tiene crédito de API. Carga saldo en console.anthropic.com > Plans & Billing (la suscripción de Claude.ai no incluye API)."
+    if re.search(r"HTTP (503|500)|high demand|overloaded|unavailable", m, re.I):
+        return f"{n}: el servicio está saturado ahora mismo (la clave parece válida). El worker reintenta y usa otro modelo; vuelve a probar en unos minutos."
+    if re.search(r"HTTP 429|quota|rate", m, re.I):
+        return f"{n}: se acabó la cuota gratuita o el límite por minuto. Prueba más tarde o con otra clave."
+    if re.search(r"Incorrect API key|API_KEY_INVALID|invalid x-api-key|authentication|HTTP 401", m, re.I):
+        extra = " Las claves de xAI empiezan con xai- y se crean en console.x.ai." if p == "grok" else ""
+        return f"{n}: la clave no es válida.{extra}"
+    return f"{n}: {m[:140]}"
+
+def _muerta(e):
+    m = str(e)
+    return not re.search(r"HTTP (503|500|429)", m) and bool(re.search(r"credit balance|billing|Incorrect API key|API_KEY_INVALID|invalid x-api-key|authentication|HTTP 401", m, re.I))
+
 def _orden(modo, d):
     tiene = [p for p in CICLO if d.get(p)]
     if modo == "apagado" or not tiene: return []
@@ -107,14 +134,15 @@ def _orden(modo, d):
 def pedir(prompt, modo="alternar"):
     """-> (dict, proveedor) o (None, None). Nunca lanza excepciones."""
     d = cargar()
-    for p in _orden(modo, d):
+    for p in [x for x in _orden(modo, d) if x not in _CAIDAS]:
         try:
             data = _json(globals()["_" + p](prompt, d))
             if isinstance(data, dict):
                 d = cargar(); d["ultimo"] = p; guardar(d)
                 return data, p
         except Exception as e:
-            print(f"  IA {NOMBRE[p]} no respondió bien ({str(e)[:140]}). Pruebo con la otra o sigo sin IA.")
+            if _muerta(e): _CAIDAS.add(p)
+            print(f"  IA {_explicar(p, e)} Sigo con otra IA o sin IA.")
     return None, None
 
 def probar(p):
@@ -124,7 +152,7 @@ def probar(p):
         r = _json(globals()["_" + p]('Responde exactamente este JSON: {"ok": true}', d))
         return bool(r.get("ok")), f"{NOMBRE[p]} funciona." if r.get("ok") else f"{NOMBRE[p]} respondió algo inesperado."
     except Exception as e:
-        return False, f"{NOMBRE[p]} falló: {str(e)[:140]}"
+        return False, _explicar(p, e)
 
 # ---------- tareas (todas devuelven None si no hay ayuda utilizable)
 def momento(modo, titulo, segs, dur, L):
