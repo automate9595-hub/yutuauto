@@ -134,12 +134,14 @@ const label=(x.stage&&BUSY.includes(st)?x.stage:ST[st]||st)+" · "+(x.est?"~":""
 const k=esc(x.key||"");
 const acts=[x.hasfile?`<button class="btn ghost sm" data-act="prev" data-k="${k}">▶ Ver</button>`:"",
 st==="ready"?`<button class="btn pri sm" data-act="now" data-k="${k}">Subir ahora ⚡</button><button class="btn ghost sm" data-act="sched" data-k="${k}">Programar</button>`:"",
-BUSY.includes(st)?`<button class="btn ghost sm danger" data-act="cancel" data-k="${k}">Cancelar</button>`:""].join("");
+BUSY.includes(st)?`<button class="btn ghost sm danger" data-act="cancel" data-k="${k}">Cancelar</button>`:"",
+x.error?`<button class="btn ghost sm" data-act="diag" data-k="${k}">Ver diagnóstico</button>`:""].join("");
 const link=x.yt_url?`<a class="yl" href="${esc(x.yt_url)}" target="_blank" rel="noopener">Ver en YouTube ↗</a>`:"";
 return `<div class="pc">${x.type==="video"?`<img loading="lazy" src="https://i.ytimg.com/vi/${esc(x.id||"")}/mqdefault.jpg" alt="" onerror="this.style.visibility='hidden'">`:""}<div><b>${esc(x.ia_title||x.title||x.url||"")}</b><span class="st ${esc(st)}">${ST[st]||esc(st)}</span><small>${x.kind==="short"?"Short":"Video"}${x.publishAt?" · "+new Date(x.publishAt).toLocaleString("es",{dateStyle:"medium",timeStyle:"short"}):""}</small>
 <div style="height:10px;border-radius:99px;background:#1a2538;overflow:hidden;margin:10px 0 4px"><span style="display:block;height:100%;width:${pct}%;min-width:${pct?4:0}px;border-radius:99px;background:${["error","cancelled"].includes(st)?"#8a5a66":BUSY.includes(st)?"#5b86ff":"#45c79b"}"></span></div><small class="pgt">${label}</small>${x.ia?`<small class="pgt">Ayuda IA: ${esc(x.ia)}</small>`:""}${link}${x.error?`<small class="err">${esc(x.error)}</small>`:""}${acts?`<div class="acts">${acts}</div>`:""}</div></div>`}).join("")}
 $("pub").onclick=async e=>{const b=e.target.closest("[data-act]");if(!b)return;const k=b.dataset.k,a=b.dataset.act;
 if(a==="prev"){const id=k.split(":")[1];openWin("Vista previa del video editado",`<video controls autoplay playsinline style="width:100%;max-height:70vh;border-radius:10px;background:#000" src="${API}/media/${encodeURIComponent(id)}_final.mp4"></video><p class="sub">Es el archivo ya editado, tal como se va a subir.</p>`);return}
+if(a==="diag"){verDiag();return}
 if(a==="cancel"){const r=await call("/cancel",{key:k});note(r?r.message:"No encuentro el worker.",!r);poll();return}
 const r=await call("/upload",{key:k,mode:a==="now"?"now":"schedule",config:cfg});note(r?r.message:"No encuentro el worker.",!r||!r.ok);poll()};
 
@@ -156,3 +158,9 @@ if(a==="test"){m.textContent="Probando…";const r=await call("/ia-test",{provee
 $("cancel-all").onclick=async()=>{if(!confirm("¿Cancelar todo lo que está en proceso?"))return;const r=await call("/cancel",{all:true});note(r?r.message:"No encuentro el worker.",!r);poll()};
 document.querySelectorAll(".js-upall").forEach(b=>b.onclick=async()=>{const r=await call("/upload",{key:"ALL",mode:"now",config:cfg});note(r?r.message:"No encuentro el worker.",!r||!r.ok);poll()});
 $("force").onclick=async()=>{const r=await call("/forzar",{});$("yt-detail").textContent=r?r.message:"No encuentro el worker.";poll()};
+
+async function verDiag(){const r=await call("/diagnostico");
+if(!r)return openWin("Diagnóstico",'<p>No encuentro el worker. Ejecutá 2-INSTALAR-Y-EJECUTAR.bat.</p>');
+openWin("Diagnóstico de la última subida",`<p class="sub">Carpeta: <code>${esc(r.carpeta||"")}</code></p><div class="row"><button class="btn pri sm" id="diag-copy" type="button">Copiar todo</button></div><pre class="log" id="diag-txt" style="height:240px;margin-top:10px">${esc(r.text||"")}</pre>${r.png?`<img src="${API}/diag.png?t=${Date.now()}" alt="Captura del error" style="margin-top:12px">`:""}`);
+const c=$("diag-copy");if(c)c.onclick=async()=>{const t=$("diag-txt").textContent;try{await navigator.clipboard.writeText(t)}catch{const a=document.createElement("textarea");a.value=t;document.body.appendChild(a);a.select();document.execCommand("copy");a.remove()}c.textContent="¡Copiado!"}}
+$("diag-btn").onclick=verDiag;

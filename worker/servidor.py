@@ -173,9 +173,22 @@ class H(BaseHTTPRequestHandler):
                     if not chunk: break
                     self.wfile.write(chunk); left -= len(chunk)
         except Exception: pass
+    def _diag_png(self):
+        f = ROOT / "error-subida.png"; ref = self.headers.get("Referer", "")
+        if not f.exists() or (ref and not any(ref.startswith(o) for o in ALLOWED)): return self._send({"ok": False}, 404)
+        b = f.read_bytes(); self.send_response(200); self.send_header("Content-Type", "image/png"); self.send_header("Content-Length", str(len(b)))
+        self.end_headers(); self.wfile.write(b)
     def do_GET(self):
         if self.path.startswith("/media/"): return self._media()
+        if self.path.startswith("/diag.png"): return self._diag_png()
         if self._bad_origin(): return self._send({"ok": False}, 403)
+        if self.path.startswith("/diagnostico"):
+            partes = []
+            for n in ("diagnostico-subida.txt", "diagnostico-ninos.txt"):
+                f = ROOT / n
+                if f.exists(): partes.append(f"===== {n} =====\n" + f.read_text("utf-8", "replace"))
+            return self._send({"ok": bool(partes), "carpeta": str(ROOT), "png": (ROOT / "error-subida.png").exists(),
+                               "text": "\n\n".join(partes) or "Todavía no hay diagnóstico guardado (no hubo errores de subida)."})
         refresh_login()
         self._send({"ok": True, **state, "log": LOG[-40:], "items": queue_items(), "ia": ia.estado()})
     def do_POST(self):

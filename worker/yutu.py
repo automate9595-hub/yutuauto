@@ -372,7 +372,7 @@ def _clic_primero(tab, selectores, idx=0, espera=0):
     return False
 
 JS_NO_NINOS = r"""(function(){
-var re=/\bno\b[\s,]+(no\s+)?(es|est[aá]|son|fue)\b[^]*ni\S{1,3}os|not\s+made\s+for\s+kids|NOT_MADE_FOR_KIDS/i;
+var re=/\bno\b[\s,]+(no\s+)?(es|est[aá]|son|fue)[^]*ni\S{1,3}os|not\s+made\s+for\s+kids|NOT_MADE_FOR_KIDS/i;
 var a=window.__A("tp-yt-paper-radio-button,[role=radio],input[type=radio],ytkc-made-for-kids-select label,ytkc-made-for-kids-select *");
 var best=null;
 for(var i=0;i<a.length;i++){var e=a[i];
@@ -382,6 +382,10 @@ for(var i=0;i<a.length;i++){var e=a[i];
  var esRadio=/radio/i.test(e.tagName+(e.getAttribute('role')||''));
  var score=(r.width>0?0:1000)+(esRadio?0:50)+t.length;
  if(!best||score<best.score)best={e:e,score:score};}
+if(!best){var c=[];for(var j=0;j<a.length;j++){var q=a[j],rr=q.getBoundingClientRect();if(rr.width<=0||rr.height<=0)continue;
+ if(!/radio/i.test(q.tagName+(q.getAttribute('role')||'')))continue;
+ if(/ni[ñn]os|kids|children/i.test(q.innerText||''))c.push(q)}
+ if(c.length===2)best={e:c[1],score:0}}
 if(!best)return null;
 best.e.scrollIntoView({block:'center'});
 var r=best.e.getBoundingClientRect();
@@ -548,6 +552,17 @@ def marcar_fallo(d, items, msg):
             it["status"] = "ready"; it["pct"] = 100; it["stage"] = "Listo"; it["error"] = msg[:260]
     save(d)
 
+def guardar_diagnostico(tab, e):
+    """Deja el diagnostico (texto + captura) en la carpeta del worker; el servidor lo entrega a la web (boton 'Ver diagnóstico')."""
+    txt = ROOT / "diagnostico-subida.txt"
+    try: txt.write_text(f"Paso: {STEP[0]}\nError: {e}\n", "utf-8")             # lo minimo, por si lo demas falla
+    except Exception as x: print("  No pude escribir el diagnóstico:", x)
+    try: tab.captura(ROOT / "error-subida.png")
+    except Exception: pass
+    try: tab.diagnostico(txt, f"Paso: {STEP[0]}\nError: {e}\nBotones: {estado_botones(tab)}")
+    except Exception as x: print("  No pude leer la página para el diagnóstico:", x)
+    print(f"  Diagnóstico guardado en: {txt}")
+
 def studio_upload(d, only=None, mode=None):
     pending = [i for i in d["items"] if i["status"] == "ready" and (only is None or i["key"] in only)]
     if not pending: print("No hay videos listos para subir."); return
@@ -580,9 +595,9 @@ def studio_upload(d, only=None, mode=None):
             try: tab.ir(f"https://studio.youtube.com/channel/{cid}")
             except Exception: pass
         except Exception as e:
-            tab.captura(ROOT / "error-subida.png"); tab.diagnostico(ROOT / "diagnostico-subida.txt", f"Paso: {STEP[0]}\nError: {e}\nBotones: {estado_botones(tab)}")
+            guardar_diagnostico(tab, e)
             it["status"] = "ready"; it["pct"] = 100; it["stage"] = "Listo"
-            it["error"] = f"No se pudo subir (paso: {STEP[0]}): {str(e)[:150]}. Detalle en worker\\diagnostico-subida.txt"
+            it["error"] = f"No se pudo subir (paso: {STEP[0]}): {str(e)[:150]}"
             print("No se pudo subir automaticamente:", it["title"], "->", STEP[0], "->", e)
             try: tab.ir(f"https://studio.youtube.com/channel/{cid}")        # sale del formulario a medias
             except Exception: pass
