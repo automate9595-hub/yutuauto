@@ -412,6 +412,57 @@ def marcar_no_ninos(tab, chk):
         time.sleep(1.5)
     return False
 
+JS_PUBLICO = r"""(function(){var a=window.__A("tp-yt-paper-radio-button[name='PUBLIC'],tp-yt-paper-radio-button,[role=radio]");
+var res=null;for(var i=0;i<a.length;i++){var e=a[i],r=e.getBoundingClientRect();if(r.width<=0||r.height<=0)continue;
+var t=((e.getAttribute('name')||'')+' '+(e.innerText||'')).trim();
+if(/^PUBLIC\b/.test(e.getAttribute('name')||'')||/^\s*(p[uú]blico|public)\b/i.test(e.innerText||'')){
+ res={on:e.getAttribute('aria-checked')==='true'||e.hasAttribute('checked'),x:r.left+r.width/2,y:r.top+r.height/2};break}}
+return res})()"""
+
+def publico_marcado(tab):
+    try:
+        r = tab.eval(JS_PUBLICO); return bool(r and r.get("on"))
+    except Exception: return False
+
+def elegir_publico(tab):
+    """Marca 'Publico' en Visibilidad (por name o por texto, español/ingles) y comprueba que quedo marcado."""
+    for _ in range(4):
+        r = tab.eval(JS_PUBLICO)
+        if not r: time.sleep(1); continue
+        if r["on"]: return True
+        for t in ("mousePressed", "mouseReleased"):
+            tab.call("Input.dispatchMouseEvent", {"type": t, "x": r["x"], "y": r["y"], "button": "left", "clickCount": 1})
+        time.sleep(0.7)
+    r = tab.eval(JS_PUBLICO)
+    return bool(r)          # si se vio y se hizo clic, seguimos: algunas versiones no exponen el estado marcado
+
+def estado_botones(tab):
+    try:
+        return tab.eval("window.__A('#next-button,#done-button').map(function(e){var r=e.getBoundingClientRect();"
+                        "return e.id+' visible='+(r.width>0&&r.height>0)+' disabled='+(e.hasAttribute('disabled')||e.getAttribute('aria-disabled')==='true')}).join(' ; ')")
+    except Exception as e: return str(e)[:60]
+
+def avanzar_hasta_visibilidad(tab, it, t0, size_mb, chk, limite=240):
+    """Toca 'Siguiente' en cada etapa hasta ver Visibilidad. Si el boton no responde, escala: reintenta 'no es para niños',
+    salta por el indice de etapas (Visibilidad) y por ultimo fuerza el clic."""
+    inicio = time.time(); ult_clic = 0; n = 0; trabado = None
+    while time.time() - inicio < limite:
+        chk(); up_progress(tab, it, t0, size_mb)
+        if tab.eval(JS_PUBLICO): return
+        if tab.habilitado("#next-button"):
+            n += 1; paso(f"tocando 'Siguiente' ({n})")
+            tab.clic_visible("#next-button", True, n > 4); time.sleep(2.2); trabado = None; continue
+        trabado = trabado or time.time(); t = time.time() - trabado
+        STEP[0] = f"esperando que 'Siguiente' se habilite ({int(t)} s) - {estado_botones(tab)}"
+        if t > 6 and int(t) % 10 == 6: marcar_no_ninos(tab, chk)                 # a veces es lo unico que falta
+        if t > 20 and int(t) % 15 == 5:
+            if tab.clic_texto(r"^(visibilidad|visibility)$", "ytcp-stepper-step, ytcp-stepper-step *, [role=tab], #step-badge-3, .step-badge, button"):
+                time.sleep(2)
+        if t > 40 and int(t) % 10 == 0:
+            tab.clic_visible("#next-button", False, True); time.sleep(2)               # clic forzado aunque diga deshabilitado
+        time.sleep(1)
+    raise RuntimeError("No pude pasar a la pantalla de Visibilidad: " + estado_botones(tab))
+
 def textos_para_subir(it, cfg):
     """Titulo/descripcion de IA. Si ya se generaron al editar se usan; si no, se intenta ahora.
     Devuelve (titulo o None, descripcion o ''). None = dejar el titulo que pone Studio (nombre del archivo)."""
@@ -456,24 +507,14 @@ def studio_upload_one(tab, cid, it, cfg=None):
         tab.captura(ROOT / "aviso-ninos.png"); tab.diagnostico(ROOT / "diagnostico-ninos.txt", "No encontré la opcion de 'para niños'")
     time.sleep(0.6)
     # Siguiente hasta llegar a Visibilidad (Detalles -> Elementos del video -> Comprobaciones -> Visibilidad)
-    for n in range(1, 8):
-        chk(); up_progress(tab, it, t0, size_mb)
-        if tab.visible("tp-yt-paper-radio-button[name='PUBLIC']"): break
-        paso(f"tocando 'Siguiente' ({n})")
-        fin = time.time() + 90
-        while not tab.habilitado("#next-button"):
-            chk()
-            if time.time() > fin: raise RuntimeError("El botón 'Siguiente' no se habilitó")
-            time.sleep(1)
-        tab.clic("#next-button"); time.sleep(2)
-    else:
-        raise RuntimeError("Llegué al final de las etapas sin ver la pantalla de Visibilidad")
+    avanzar_hasta_visibilidad(tab, it, t0, size_mb, chk)
     if now_mode:
         paso("eligiendo Público (publicar ahora)")
-        tab.clic("tp-yt-paper-radio-button[name='PUBLIC']", 0, 20); time.sleep(0.8)
+        if not elegir_publico(tab): raise RuntimeError("No encontré la opción 'Público' en la pantalla de Visibilidad")
+        time.sleep(0.8)
     else:
         paso("programando la fecha")
-        tab.clic("#second-container-expand-button", 0, 20); time.sleep(1)
+        tab.clic_visible("#second-container-expand-button") or tab.clic("#second-container-expand-button", 0, 20); time.sleep(1)
         tab.escribir("ytcp-date-picker input", fmt_fecha(campo_valor(tab, "ytcp-date-picker input"), when)); tab.tecla("Enter", 13); time.sleep(0.6)
         tab.escribir("#time-of-day-container input", fmt_hora(campo_valor(tab, "#time-of-day-container input"), when)); tab.tecla("Enter", 13); time.sleep(0.6)
     paso("esperando a que termine la subida")
@@ -481,12 +522,13 @@ def studio_upload_one(tab, cid, it, cfg=None):
     while True:
         chk(); up_progress(tab, it, t0, size_mb)
         if tab.habilitado("#done-button"): break
+        if now_mode and int(time.time() - t0) % 20 == 0 and not publico_marcado(tab): elegir_publico(tab)   # por si no quedo marcado
         if time.time() > end: raise RuntimeError("La subida tardó más de 25 minutos")
         time.sleep(1.5)
     paso("publicando" if now_mode else "programando")
-    tab.clic("#done-button")
+    if not tab.clic_visible("#done-button", True, True): raise RuntimeError("No encontré el botón final de publicar")
     fin = time.time() + 120
-    while tab.visible("#done-button"):                        # cuando Studio cierra el formulario, ya se publicó
+    while tab.visible("#done-button") and not tab.visible("ytcp-video-share-dialog"):   # cuando Studio cierra el formulario, ya se publicó
         chk()
         if time.time() > fin: raise RuntimeError("Studio no confirmó la publicación (el botón final sigue ahí)")
         time.sleep(1)
@@ -538,7 +580,7 @@ def studio_upload(d, only=None, mode=None):
             try: tab.ir(f"https://studio.youtube.com/channel/{cid}")
             except Exception: pass
         except Exception as e:
-            tab.captura(ROOT / "error-subida.png"); tab.diagnostico(ROOT / "diagnostico-subida.txt", f"Paso: {STEP[0]}\nError: {e}")
+            tab.captura(ROOT / "error-subida.png"); tab.diagnostico(ROOT / "diagnostico-subida.txt", f"Paso: {STEP[0]}\nError: {e}\nBotones: {estado_botones(tab)}")
             it["status"] = "ready"; it["pct"] = 100; it["stage"] = "Listo"
             it["error"] = f"No se pudo subir (paso: {STEP[0]}): {str(e)[:150]}. Detalle en worker\\diagnostico-subida.txt"
             print("No se pudo subir automaticamente:", it["title"], "->", STEP[0], "->", e)

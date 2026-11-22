@@ -148,6 +148,25 @@ class Tab:
         return bool(self.eval(f"window.__A({json.dumps(sel)}).some(function(e){{var r=e.getBoundingClientRect();"
                               "return r.width>0&&r.height>0&&!e.hasAttribute('disabled')&&e.getAttribute('aria-disabled')!=='true'})"))
 
+    def _centro_visible(self, sel, habilitado=False):
+        """Centro del primer elemento VISIBLE (y habilitado si se pide). Studio repite ids (#next-button) en partes ocultas."""
+        return self.eval("(function(){var a=window.__A(%s);for(var i=0;i<a.length;i++){var e=a[i],r=e.getBoundingClientRect();"
+                         "if(r.width<=0||r.height<=0)continue;"
+                         "if(%s&&(e.hasAttribute('disabled')||e.getAttribute('aria-disabled')==='true'))continue;"
+                         "e.scrollIntoView({block:'center'});r=e.getBoundingClientRect();return {x:r.left+r.width/2,y:r.top+r.height/2}}return null})()"
+                         % (json.dumps(sel), "true" if habilitado else "false"))
+
+    def clic_visible(self, sel, habilitado=False, forzar=False):
+        """Clic real del mouse en el primer elemento visible. forzar=True tambien hace .click() por JS."""
+        c = self._centro_visible(sel, habilitado)
+        if not c: return False
+        for t in ("mousePressed", "mouseReleased"):
+            self.call("Input.dispatchMouseEvent", {"type": t, "x": c["x"], "y": c["y"], "button": "left", "clickCount": 1})
+        if forzar:
+            self.eval("(function(){var a=window.__A(%s);for(var i=0;i<a.length;i++){var r=a[i].getBoundingClientRect();"
+                      "if(r.width>0&&r.height>0){a[i].click();return}}})()" % json.dumps(sel))
+        return True
+
     def esperar_visible(self, sel, timeout=30, chk=None):
         end = time.time() + timeout
         while time.time() < end:
@@ -211,11 +230,14 @@ class Tab:
         try:
             r = self.eval("(function(){var o=[];var a=window.__A('button,ytcp-button,ytcp-icon-button,tp-yt-paper-item,ytcp-text-menu-item,a,input,[role=button],[role=menuitem]');"
                           "for(var i=0;i<a.length&&o.length<90;i++){var e=a[i],r=e.getBoundingClientRect();if(r.width<=0||r.height<=0)continue;"
-                          "o.push(e.tagName.toLowerCase()+(e.id?'#'+e.id:'')+' | aria='+(e.getAttribute('aria-label')||'')+' | '+((e.innerText||e.value||'')+'').trim().slice(0,40))}"
-                          "return {url:location.href,title:document.title,file_inputs:window.__A('input[type=file]').length,items:o}})()")
+                          "o.push(e.tagName.toLowerCase()+(e.id?'#'+e.id:'')+((e.hasAttribute('disabled')||e.getAttribute('aria-disabled')==='true')?' [DESHABILITADO]':'')+' | aria='+(e.getAttribute('aria-label')||'')+' | '+((e.innerText||e.value||'')+'').trim().slice(0,40))}"
+                          "var d=window.__D('ytcp-uploads-dialog');var rs=window.__A('tp-yt-paper-radio-button,[role=radio]').filter(function(e){return e.getBoundingClientRect().width>0}).map(function(e){return (e.getAttribute('name')||'')+' checked='+(e.getAttribute('aria-checked')||e.hasAttribute('checked'))+' | '+(e.innerText||'').trim().slice(0,50)});"
+                          "return {url:location.href,title:document.title,file_inputs:window.__A('input[type=file]').length,items:o,dialogo:d?(d.innerText||'').slice(0,1500):'(no hay ytcp-uploads-dialog)',radios:rs}})()")
             with open(ruta, "w", encoding="utf-8") as f:
                 f.write(extra + "\nURL: %s\nTitulo: %s\nInputs de archivo: %s\n\nElementos visibles:\n" % (r["url"], r["title"], r["file_inputs"]))
                 f.write("\n".join(r["items"]))
+                f.write("\n\nRadios visibles:\n" + "\n".join(r.get("radios", [])))
+                f.write("\n\nTexto del cuadro de subida:\n" + str(r.get("dialogo", "")))
         except Exception as e:
             try: open(ruta, "w", encoding="utf-8").write(extra + "\nNo pude leer la pagina: " + str(e))
             except Exception: pass
