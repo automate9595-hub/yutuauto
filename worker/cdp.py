@@ -54,18 +54,39 @@ HELPERS = ("window.__D=window.__D||function(s,r){r=r||document;var x=r.querySele
            "var a=r.querySelectorAll('*');for(var i=0;i<a.length;i++){if(a[i].shadowRoot)window.__A(s,a[i].shadowRoot,o)}return o};")
 
 class Tab:
-    def __init__(self, info):
-        self.id = info["id"]; self.ws = WS(info["webSocketDebuggerUrl"]); self.n = 0
+    def __init__(self, info, propia=True):
+        self.id = info["id"]; self.propia = propia; self.n = 0
+        self.ws = WS(info["webSocketDebuggerUrl"])
         self.call("Page.enable"); self.call("Page.bringToFront")
+
+    @staticmethod
+    def listar(port=9222):
+        with urllib.request.urlopen(f"http://127.0.0.1:{port}/json", timeout=8) as r: return json.loads(r.read())
+
+    @staticmethod
+    def existente(prefijo, port=9222):
+        """Usa la pestaña de Studio que ya está abierta (evita llenar Chrome de pestañas)."""
+        try:
+            for t in Tab.listar(port):
+                if t.get("type") == "page" and t.get("url", "").startswith(prefijo) and t.get("webSocketDebuggerUrl"):
+                    return Tab(t, propia=False)
+        except Exception: pass
+        return None
 
     @staticmethod
     def abrir(url="about:blank", port=9222):
         q = f"http://127.0.0.1:{port}/json/new?" + urllib.parse.quote(url, safe=":/?&=#")
+        info, err = None, None
         for m in ("PUT", "GET"):
             try:
-                with urllib.request.urlopen(urllib.request.Request(q, method=m), timeout=8) as r: return Tab(json.loads(r.read()))
+                with urllib.request.urlopen(urllib.request.Request(q, method=m), timeout=8) as r: info = json.loads(r.read()); break
             except Exception as e: err = e
-        raise RuntimeError("No pude abrir una pestaña en Chrome: " + str(err)[:100])
+        if not info: raise RuntimeError("Chrome no me dejó abrir una pestaña: " + str(err)[:100])
+        try: return Tab(info)
+        except Exception as e:                                         # no dejar pestañas huérfanas
+            try: urllib.request.urlopen(f"http://127.0.0.1:{port}/json/close/{info['id']}", timeout=3).read()
+            except Exception: pass
+            raise RuntimeError("No pude controlar la pestaña de Chrome por DevTools: " + str(e)[:100])
 
     def call(self, method, params=None, timeout=30):
         self.n += 1; i = self.n
@@ -89,13 +110,13 @@ class Tab:
     def url(self): return self.eval("location.href") or ""
 
     def ir(self, url, timeout=45):
-        self.call("Page.navigate", {"url": url})
+        self.call("Page.navigate", {"url": url}); time.sleep(1.5)
         end = time.time() + timeout
         while time.time() < end:
-            time.sleep(0.5)
             try:
-                if self.eval("document.readyState") == "complete": return
+                if self.eval("document.readyState") == "complete": time.sleep(0.8); return
             except Exception: pass
+            time.sleep(0.5)
 
     def existe(self, sel): return bool(self.eval(f"!!window.__D({json.dumps(sel)})"))
     def cuantos(self, sel): return int(self.eval(f"window.__A({json.dumps(sel)}).length") or 0)
@@ -104,7 +125,9 @@ class Tab:
         end = time.time() + timeout
         while time.time() < end:
             if chk: chk()
-            if self.existe(sel): return True
+            try:
+                if self.existe(sel): return True
+            except Exception: pass                     # la pagina esta navegando: reintentar
             time.sleep(0.5)
         return False
 
@@ -159,7 +182,22 @@ class Tab:
             with open(ruta, "wb") as f: f.write(base64.b64decode(d))
         except Exception: pass
 
+    def diagnostico(self, ruta, extra=""):
+        """Guarda que ve el worker en la pagina (para ajustar los botones si Studio cambio)."""
+        try:
+            r = self.eval("(function(){var o=[];var a=window.__A('button,ytcp-button,ytcp-icon-button,tp-yt-paper-item,ytcp-text-menu-item,a,input,[role=button],[role=menuitem]');"
+                          "for(var i=0;i<a.length&&o.length<90;i++){var e=a[i],r=e.getBoundingClientRect();if(r.width<=0||r.height<=0)continue;"
+                          "o.push(e.tagName.toLowerCase()+(e.id?'#'+e.id:'')+' | aria='+(e.getAttribute('aria-label')||'')+' | '+((e.innerText||e.value||'')+'').trim().slice(0,40))}"
+                          "return {url:location.href,title:document.title,file_inputs:window.__A('input[type=file]').length,items:o}})()")
+            with open(ruta, "w", encoding="utf-8") as f:
+                f.write(extra + "\nURL: %s\nTitulo: %s\nInputs de archivo: %s\n\nElementos visibles:\n" % (r["url"], r["title"], r["file_inputs"]))
+                f.write("\n".join(r["items"]))
+        except Exception as e:
+            try: open(ruta, "w", encoding="utf-8").write(extra + "\nNo pude leer la pagina: " + str(e))
+            except Exception: pass
+
     def cerrar(self):
         self.ws.close()
+        if not self.propia: return                      # la pestaña del usuario no se cierra
         try: urllib.request.urlopen(f"http://127.0.0.1:9222/json/close/{self.id}", timeout=3).read()
         except Exception: pass

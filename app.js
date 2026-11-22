@@ -7,7 +7,7 @@ cut_mode:"auto",cut_start:0,short_len:58,frame:"crop",vid_trim:false,vid_start:0
 fx_list:[],fx_mode:"seq",fx_dur:3,fx_gap:0,fx_blend:0.6,fx_power:1,fx_start:0,fx_repeat:true,
 vivid:false,vignette:false,fade:false,loudnorm:false,
 ia_mode:"alternar",ia_cut:true,ia_fx:true,ia_sub:true,ia_text:true};
-let cfg=Object.assign({},DEF,load(C,{}));
+let cfg=Object.assign({},DEF,load(C,{}));if(String(cfg.ia_mode).includes("grok"))cfg.ia_mode=String(cfg.ia_mode).replace("grok","groq");
 function parse(raw){try{const u=new URL(raw.trim()),h=u.hostname.replace(/^www\./,"").toLowerCase();
 if(!["youtube.com","m.youtube.com","music.youtube.com","youtu.be"].includes(h))return null;
 const l=u.searchParams.get("list");let v=null;
@@ -91,23 +91,23 @@ poll();
 const ST={pending:"En espera",processing:"En proceso",ready:"Editado, listo para subir",uploading:"Subiendo a YouTube",scheduled:"Programado en YouTube",published:"Publicado",error:"Error",cancelled:"Cancelado"};
 const BUSY=["pending","processing","uploading"];
 function pubRender(items){const el=$("pub");if(!items.length){el.innerHTML='<div class="empty">Todavía no hay videos procesados.</div>';return}
-el.innerHTML=items.map(x=>{const st=x.status||"",pct=Math.max(0,Math.min(100,Math.round(x.pct||(["ready","scheduled","published"].includes(st)?100:0))));
+el.innerHTML=items.map(x=>{const st=x.status||"",pct=["ready","scheduled","published"].includes(st)?100:Math.max(0,Math.min(100,Math.round(x.pct||0)));
 const label=(x.stage&&BUSY.includes(st)?x.stage:ST[st]||st)+" · "+(x.est?"~":"")+pct+" %";
 const k=esc(x.key||"");
 const acts=[x.hasfile?`<button class="btn ghost sm" data-act="prev" data-k="${k}">▶ Ver</button>`:"",
 st==="ready"?`<button class="btn pri sm" data-act="now" data-k="${k}">Subir ahora ⚡</button><button class="btn ghost sm" data-act="sched" data-k="${k}">Programar</button>`:"",
 BUSY.includes(st)?`<button class="btn ghost sm danger" data-act="cancel" data-k="${k}">Cancelar</button>`:""].join("");
 return `<div class="pc">${x.type==="video"?`<img loading="lazy" src="https://i.ytimg.com/vi/${esc(x.id||"")}/mqdefault.jpg" alt="" onerror="this.style.visibility='hidden'">`:""}<div><b>${esc(x.title||x.url||"")}</b><span class="st ${esc(st)}">${ST[st]||esc(st)}</span><small>${x.kind==="short"?"Short":"Video"}${x.publishAt?" · "+new Date(x.publishAt).toLocaleString("es",{dateStyle:"medium",timeStyle:"short"}):""}</small>
-<div class="pg ${esc(st)}"><i style="width:${pct}%"></i></div><small class="pgt">${label}</small>${x.ia?`<small class="pgt">Ayuda IA: ${esc(x.ia)}</small>`:""}${x.error?`<small class="err">${esc(x.error)}</small>`:""}${acts?`<div class="acts">${acts}</div>`:""}</div></div>`}).join("")}
+<div class="pg ${esc(st)}" style="height:10px;border-radius:99px;background:#1a2538;overflow:hidden;margin:10px 0 4px"><span style="display:block;height:100%;width:${pct}%;min-width:${pct?4:0}px;border-radius:99px;background:${["error","cancelled"].includes(st)?"#8a5a66":BUSY.includes(st)?"#5b86ff":"#45c79b"}"></span></div><small class="pgt">${label}</small>${x.ia?`<small class="pgt">Ayuda IA: ${esc(x.ia)}</small>`:""}${x.error?`<small class="err">${esc(x.error)}</small>`:""}${acts?`<div class="acts">${acts}</div>`:""}</div></div>`}).join("")}
 $("pub").onclick=async e=>{const b=e.target.closest("[data-act]");if(!b)return;const k=b.dataset.k,a=b.dataset.act,x=q.find(y=>y.key===k)||{};
 if(a==="prev"){const id=k.split(":")[1];openWin("Vista previa del video editado",`<video controls autoplay playsinline style="width:100%;max-height:70vh;border-radius:10px;background:#000" src="${API}/media/${encodeURIComponent(id)}_final.mp4"></video><p class="sub">Es el archivo ya editado, tal como se va a subir.</p>`);return}
 if(a==="cancel"){const r=await call("/cancel",{key:k});note(r?r.message:"No encuentro el worker.",!r);poll();return}
 const r=await call("/upload",{key:k,mode:a==="now"?"now":"schedule",config:cfg});note(r?r.message:"No encuentro el worker.",!r||!r.ok);poll()};
-const iaTxt=s=>{["gemini","grok","claude"].forEach(p=>{$("ia-"+p).textContent=s[p]?"Clave guardada en tu PC ✓":"Sin clave"});$("ia-est").textContent="· "+(s.gemini||s.grok||s.claude?(s.ultimo?"última ayuda: "+s.ultimo:"lista"):"sin claves")};
+const iaTxt=s=>{["gemini","groq","claude"].forEach(p=>{$("ia-"+p).textContent=s[p]?"Clave guardada en tu PC ✓":"Sin clave"});$("ia-est").textContent="· "+(s.gemini||s.grok||s.claude?(s.ultimo?"última ayuda: "+s.ultimo:"lista"):"sin claves")};
 document.querySelectorAll("[data-ia]").forEach(b=>b.onclick=async()=>{const p=b.dataset.ia,a=b.dataset.a,m=$("ia-msg");m.textContent="";
 if(a==="save"){const v=$("k-"+p).value.trim();if(!v){m.textContent="Pegá la clave primero.";return}const r=await call("/ia",{[p]:v});$("k-"+p).value="";m.textContent=r?r.message:"No encuentro el worker.";if(r&&r.ia)iaTxt(r.ia)}
 if(a==="del"){const r=await call("/ia",{borrar:p});m.textContent=r?"Clave borrada.":"No encuentro el worker.";if(r&&r.ia)iaTxt(r.ia)}
-if(a==="test"){m.textContent="Probando…";const r=await call("/ia-test",{proveedor:p},50000);m.textContent=r?r.message:"No encuentro el worker."}});
+if(a==="test"){m.textContent="Probando…";const r=await call("/ia-test",{proveedor:p},90000);m.textContent=r?r.message:"No encuentro el worker."}});
 $("cancel-all").onclick=async()=>{if(!confirm("¿Cancelar todo lo que está en proceso?"))return;const r=await call("/cancel",{all:true});note(r?r.message:"No encuentro el worker.",!r);poll()};
 document.querySelectorAll(".js-upall").forEach(b=>b.onclick=async()=>{const r=await call("/upload",{key:"ALL",mode:"now",config:cfg});note(r?r.message:"No encuentro el worker.",!r||!r.ok);poll()});
 $("force").onclick=async()=>{const r=await call("/forzar",{});note(r?r.message:"No encuentro el worker.",!r);poll()};

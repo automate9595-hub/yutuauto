@@ -4,15 +4,16 @@ Regla de oro: la IA SOLO sugiere. Todo se valida y, si una IA falla, tarda o res
 se prueba con la otra y, si tampoco, la edicion sigue con tu configuracion normal.
 Las claves viven solo en claves-ia.json (esta carpeta). No se suben a GitHub ni salen en la web.
 """
-import json, os, pathlib, re, time, urllib.error, urllib.request
+import json, os, pathlib, re, socket, time, urllib.error, urllib.request
 import efectos
 
 ROOT = pathlib.Path(__file__).parent
 KF = ROOT / "claves-ia.json"
-TIMEOUT = 40
-NOMBRE = {"gemini": "Gemini", "grok": "Grok", "claude": "Claude"}
-CICLO = ["gemini", "grok", "claude"]
-_grok_model = [None]
+TIMEOUT = 30
+NOMBRE = {"gemini": "Gemini", "groq": "Groq", "claude": "Claude"}
+CICLO = ["gemini", "groq", "claude"]
+_groq_modelos = [None]
+_HASTA = [None]       # limite de tiempo total para la prueba del boton 'Probar'
 
 # ---------- claves (nunca se devuelven a la web)
 def cargar():
@@ -24,7 +25,7 @@ def guardar(d):
 
 def estado():
     d = cargar()
-    return {"gemini": bool(d.get("gemini")), "grok": bool(d.get("grok")), "claude": bool(d.get("claude")), "ultimo": NOMBRE.get(d.get("ultimo"), "")}
+    return {"gemini": bool(d.get("gemini")), "groq": bool(d.get("groq")), "claude": bool(d.get("claude")), "ultimo": NOMBRE.get(d.get("ultimo"), "")}
 
 def set_claves(data):
     d = cargar()
@@ -37,55 +38,73 @@ def set_claves(data):
     guardar(d)
 
 # ---------- HTTP
+MODELOS_GEMINI = ["gemini-2.5-flash", "gemini-flash-latest", "gemini-2.5-flash-lite"]
+
 def _http(url, body=None, headers=None):
-    h = {"Content-Type": "application/json"}; h.update(headers or {})
+    h = {"Content-Type": "application/json", "User-Agent": "Yutu-Worker/1.0"}; h.update(headers or {})
+    t = TIMEOUT
+    if _HASTA[0]:
+        t = min(TIMEOUT, _HASTA[0] - time.time())
+        if t < 3: raise RuntimeError("Tiempo de espera agotado")
     req = urllib.request.Request(url, data=None if body is None else json.dumps(body).encode(), headers=h,
                                  method="GET" if body is None else "POST")
     try:
-        with urllib.request.urlopen(req, timeout=TIMEOUT) as r: return json.loads(r.read().decode("utf-8"))
+        with urllib.request.urlopen(req, timeout=t) as r: return json.loads(r.read().decode("utf-8"))
     except urllib.error.HTTPError as e:
         raise RuntimeError(f"HTTP {e.code} {e.read().decode('utf-8', 'replace')[:160]}")
-
-MODELOS_GEMINI = ["gemini-flash-latest", "gemini-2.5-flash", "gemini-2.5-flash-lite"]
+    except (socket.timeout, TimeoutError):
+        raise RuntimeError("Tiempo de espera agotado")
+    except urllib.error.URLError as e:
+        if isinstance(e.reason, (socket.timeout, TimeoutError)): raise RuntimeError("Tiempo de espera agotado")
+        raise RuntimeError("Sin conexión con el servicio: " + str(e.reason)[:80])
 
 def _gemini(prompt, d):
     cuerpo = {"contents": [{"role": "user", "parts": [{"text": prompt}]}],
               "generationConfig": {"temperature": 0.4, "responseMimeType": "application/json"}}
-    hdr = {"x-goog-api-key": d["gemini"]}; ultimo = RuntimeError("Gemini no respondió")
+    hdr = {"x-goog-api-key": d["gemini"]}; ultimo = RuntimeError("Gemini no respondió"); t0 = time.time()
+    def texto(r): return "".join(p.get("text", "") for p in r["candidates"][0]["content"]["parts"])
     for modelo in ([d["modelo_gemini"]] if d.get("modelo_gemini") else MODELOS_GEMINI):
         for intento in range(2):
+            if time.time() - t0 > 50: raise ultimo                                  # nunca bloquear la edicion mas de ~1 min
             try:
-                r = _http(f"https://generativelanguage.googleapis.com/v1beta/models/{modelo}:generateContent", cuerpo, hdr)
-                return "".join(p.get("text", "") for p in r["candidates"][0]["content"]["parts"])
+                return texto(_http(f"https://generativelanguage.googleapis.com/v1beta/models/{modelo}:generateContent", cuerpo, hdr))
             except RuntimeError as e:
                 ultimo = e; m = str(e)
-                if re.search(r"HTTP (503|500|429)", m): time.sleep(2 * (intento + 1)); continue   # saturado: reintenta y luego otro modelo
-                if "HTTP 404" in m: break                                                       # ese modelo ya no existe: siguiente
+                if "Tiempo de espera" in m: break                                    # lento: probar otro modelo
+                if re.search(r"HTTP (503|500|429)", m) and intento == 0: time.sleep(2); continue
+                if re.search(r"HTTP (503|500|429|404)", m): break
                 if re.search(r"HTTP (400|401|403)", m) and not d["gemini"].startswith("AIza"):
-                    try:                                                                         # claves "AQ." pueden ser de Vertex
-                        r = _http("https://aiplatform.googleapis.com/v1/publishers/google/models/gemini-2.5-flash:generateContent", cuerpo, hdr)
-                        return "".join(p.get("text", "") for p in r["candidates"][0]["content"]["parts"])
-                    except RuntimeError as e2: raise RuntimeError(f"{str(e)[:80]} | Vertex: {str(e2)[:80]}")
+                    try: return texto(_http("https://aiplatform.googleapis.com/v1/publishers/google/models/gemini-2.5-flash:generateContent", cuerpo, hdr))
+                    except RuntimeError as e2: raise RuntimeError(f"{m[:80]} | Vertex: {str(e2)[:80]}")
                 raise
     raise ultimo
 
-def _elegir_grok(d):
-    if d.get("modelo_grok"): return d["modelo_grok"]
-    if _grok_model[0]: return _grok_model[0]
-    r = _http("https://api.x.ai/v1/models", None, {"Authorization": "Bearer " + d["grok"]})
-    ids = [m["id"] for m in r.get("data", []) if str(m.get("id", "")).startswith("grok")
-           and not re.search(r"image|imagine|video|embed|vision", m["id"])]
-    if not ids: raise RuntimeError("Tu clave de Grok no lista modelos de texto.")
-    ids.sort(key=lambda i: (("fast" in i or "mini" in i), i), reverse=True)   # prefiere los rapidos
-    _grok_model[0] = ids[0]; return ids[0]
+PREFERIDOS_GROQ = ["llama-3.3-70b-versatile", "openai/gpt-oss-120b", "openai/gpt-oss-20b", "llama-3.1-8b-instant"]
 
-def _grok(prompt, d):
-    r = _http("https://api.x.ai/v1/chat/completions",
-              {"model": _elegir_grok(d), "temperature": 0.4,
-               "messages": [{"role": "system", "content": "Respondes SOLO con JSON válido, sin texto extra."},
-                            {"role": "user", "content": prompt}]},
-              {"Authorization": "Bearer " + d["grok"]})
-    return r["choices"][0]["message"]["content"]
+def _modelos_groq(d):
+    if d.get("modelo_groq"): return [d["modelo_groq"]]
+    if _groq_modelos[0]: return _groq_modelos[0]
+    r = _http("https://api.groq.com/openai/v1/models", None, {"Authorization": "Bearer " + d["groq"]})
+    ids = [m["id"] for m in r.get("data", []) if not re.search(r"whisper|guard|tts|playai|orpheus|distil|embed|safeguard", str(m.get("id", "")), re.I)]
+    if not ids: raise RuntimeError("Tu clave de Groq no lista modelos de texto.")
+    ids.sort(key=lambda i: PREFERIDOS_GROQ.index(i) if i in PREFERIDOS_GROQ else 99)
+    _groq_modelos[0] = ids[:3]; return _groq_modelos[0]
+
+def _groq(prompt, d):
+    ultimo = RuntimeError("Groq no respondió")
+    for modelo in _modelos_groq(d):
+        try:
+            r = _http("https://api.groq.com/openai/v1/chat/completions",
+                      {"model": modelo, "temperature": 0.4,
+                       "messages": [{"role": "system", "content": "Respondes SOLO con JSON válido, sin texto extra."},
+                                    {"role": "user", "content": prompt}]},
+                      {"Authorization": "Bearer " + d["groq"]})
+            return r["choices"][0]["message"]["content"]
+        except RuntimeError as e:
+            ultimo = e
+            if re.search(r"decommission|not found|does not exist|HTTP 404|HTTP 400.*model", str(e), re.I): continue   # modelo retirado: siguiente
+            raise
+    raise ultimo
 
 def _claude(prompt, d):
     r = _http("https://api.anthropic.com/v1/messages",
@@ -109,10 +128,12 @@ def _explicar(p, e):
         return f"{n}: la clave es válida pero la cuenta no tiene crédito de API. Carga saldo en console.anthropic.com > Plans & Billing (la suscripción de Claude.ai no incluye API)."
     if re.search(r"HTTP (503|500)|high demand|overloaded|unavailable", m, re.I):
         return f"{n}: el servicio está saturado ahora mismo (la clave parece válida). El worker reintenta y usa otro modelo; vuelve a probar en unos minutos."
+    if re.search(r"Tiempo de espera|timed out|Sin conexi", m, re.I):
+        return f"{n}: no respondió a tiempo (internet lento o servicio saturado). Revisa tu conexión y vuelve a probar."
     if re.search(r"HTTP 429|quota|rate", m, re.I):
         return f"{n}: se acabó la cuota gratuita o el límite por minuto. Prueba más tarde o con otra clave."
     if re.search(r"Incorrect API key|API_KEY_INVALID|invalid x-api-key|authentication|HTTP 401", m, re.I):
-        extra = " Las claves de xAI empiezan con xai- y se crean en console.x.ai." if p == "grok" else ""
+        extra = " Las claves de GroqCloud empiezan con gsk_ y se crean en console.groq.com." if p == "groq" else ""
         return f"{n}: la clave no es válida.{extra}"
     return f"{n}: {m[:140]}"
 
@@ -121,6 +142,7 @@ def _muerta(e):
     return not re.search(r"HTTP (503|500|429)", m) and bool(re.search(r"credit balance|billing|Incorrect API key|API_KEY_INVALID|invalid x-api-key|authentication|HTTP 401", m, re.I))
 
 def _orden(modo, d):
+    modo = (modo or "alternar").replace("grok", "groq")      # nombres antiguos guardados en la web
     tiene = [p for p in CICLO if d.get(p)]
     if modo == "apagado" or not tiene: return []
     if modo.startswith("solo_"): return [p for p in tiene if p == modo[5:]]
@@ -148,11 +170,13 @@ def pedir(prompt, modo="alternar"):
 def probar(p):
     d = cargar()
     if not d.get(p): return False, f"Falta la clave de {NOMBRE[p]}."
+    _HASTA[0] = time.time() + 55
     try:
         r = _json(globals()["_" + p]('Responde exactamente este JSON: {"ok": true}', d))
         return bool(r.get("ok")), f"{NOMBRE[p]} funciona." if r.get("ok") else f"{NOMBRE[p]} respondió algo inesperado."
     except Exception as e:
         return False, _explicar(p, e)
+    finally: _HASTA[0] = None
 
 # ---------- tareas (todas devuelven None si no hay ayuda utilizable)
 def momento(modo, titulo, segs, dur, L):

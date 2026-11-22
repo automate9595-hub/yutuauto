@@ -21,7 +21,7 @@ def check_cancel(it):
     if cancel_requested(it): raise Cancelled()
 
 def ia_activa(cfg):
-    return cfg.get("ia_mode", "alternar") != "apagado" and any(ia.estado()[k] for k in ("gemini", "grok"))
+    return cfg.get("ia_mode", "alternar") != "apagado" and any(ia.estado()[k] for k in ("gemini", "groq", "claude"))
 
 def make_plan(cfg, upload):
     w = {"dl": .20, "ia": .08 if (ia_activa(cfg) and cfg.get("ia_cut")) else 0,
@@ -324,6 +324,43 @@ def fmt_hora(actual, w):
 def campo_valor(tab, sel):
     return tab.eval(f"(function(){{var e=window.__D({json.dumps(sel)});return e?e.value||'':''}})()") or ""
 
+ARCHIVO = "input[type=file]"
+def abrir_dialogo(tab, cid, chk):
+    """Abre el cuadro 'Subir videos' de Studio probando varias formas (Studio cambia seguido)."""
+    paso("abriendo la subida: enlace directo")
+    tab.ir(f"https://studio.youtube.com/channel/{cid}/videos/upload?d=ud")
+    if tab.esperar(ARCHIVO, 20, chk): return
+    tab.ir(f"https://studio.youtube.com/channel/{cid}"); time.sleep(2)
+    paso("abriendo la subida: botón de subir del panel")
+    for sel in ("#upload-icon", "#upload-button", "ytcp-icon-button#upload-icon", "ytcp-button#upload-button",
+                "[aria-label='Subir vídeos']", "[aria-label='Subir videos']", "[aria-label='Upload videos']",
+                "[aria-label*='ubir v' i]", "[aria-label*='pload v' i]"):
+        chk()
+        try:
+            if tab.existe(sel):
+                tab.clic(sel)
+                if tab.esperar(ARCHIVO, 8, chk): return
+        except Cancelled: raise
+        except Exception: pass
+    paso("abriendo la subida: menú Crear")
+    for sel in ("#create-icon", "ytcp-button#create-icon", "[aria-label='Crear']", "[aria-label='Create']"):
+        chk()
+        try:
+            if tab.existe(sel):
+                tab.clic(sel); time.sleep(1.2)
+                if not tab.clic_texto(r"^(subir v[ií]deos?|upload videos?)$") and tab.existe("#text-item-0"): tab.clic("#text-item-0")
+                if tab.esperar(ARCHIVO, 10, chk): return
+        except Cancelled: raise
+        except Exception: pass
+    try:
+        if tab.clic_texto(r"^(crear|create)$"):
+            time.sleep(1.2)
+            if not tab.clic_texto(r"^(subir v[ií]deos?|upload videos?)$") and tab.existe("#text-item-0"): tab.clic("#text-item-0")
+            if tab.esperar(ARCHIVO, 10, chk): return
+    except Cancelled: raise
+    except Exception: pass
+    raise RuntimeError("Studio no abrió el cuadro de subida (probé enlace directo, botón de subir y menú Crear)")
+
 def studio_upload_one(tab, cid, it):
     title = (it.get("ia_title") or it["title"]) + (" #Shorts" if it["kind"] == "short" else "")
     desc = it.get("ia_desc") or it["title"]
@@ -332,16 +369,7 @@ def studio_upload_one(tab, cid, it):
     size_mb = os.path.getsize(it["file"]) / 1048576
     chk = lambda: check_cancel(it)
     it["status"] = "uploading"; it.pop("error", None); set_prog(it, "up", 0.0, True)
-    paso("abriendo el cuadro de subida de Studio")
-    tab.ir(f"https://studio.youtube.com/channel/{cid}/videos/upload?d=ud")
-    if not tab.esperar("input[type=file]", 25, chk):
-        paso("abriendo Crear > Subir videos")
-        tab.ir(f"https://studio.youtube.com/channel/{cid}")
-        tab.esperar("#create-icon", 20, chk)
-        if not (tab.existe("#create-icon") and (tab.clic("#create-icon") or True)): raise RuntimeError("No encuentro el botón Crear de Studio")
-        time.sleep(1)
-        if not tab.clic_texto(r"^(subir v[ií]deos?|upload videos?)$"): tab.clic("#text-item-0")
-        if not tab.esperar("input[type=file]", 30, chk): raise RuntimeError("No apareció el selector de archivos de Studio")
+    abrir_dialogo(tab, cid, chk)
     paso("enviando el archivo de video")
     tab.archivos("input[type=file]", [it["file"]]); t0 = time.time()
     paso("esperando el formulario de detalles")
@@ -383,6 +411,12 @@ def studio_upload_one(tab, cid, it):
     it["status"] = "published" if now_mode else "scheduled"; it["pct"] = 100
     it["stage"] = "Publicado" if now_mode else "Programado"; it.pop("est", None)
 
+def marcar_fallo(d, items, msg):
+    for it in items:
+        if it["status"] in ("ready", "uploading"):
+            it["status"] = "ready"; it["pct"] = 100; it["stage"] = "Listo"; it["error"] = msg[:260]
+    save(d)
+
 def studio_upload(d, only=None, mode=None):
     pending = [i for i in d["items"] if i["status"] == "ready" and (only is None or i["key"] in only)]
     if not pending: print("No hay videos listos para subir."); return
@@ -390,17 +424,21 @@ def studio_upload(d, only=None, mode=None):
     for it in pending:
         it.pop("publishAt", None) if now_mode else it.__setitem__("publishAt", next_slot(d, it["kind"]))
     write_plan(pending); save(d)
-    print("Conectando con el Chrome del worker...")
-    tab = cdp.Tab.abrir("https://studio.youtube.com")
-    print("Si no iniciaste sesion en YouTube, hacelo en la ventana de Chrome (espero hasta 5 min)...")
-    cid, end = None, time.time() + 300
-    while time.time() < end:
-        try:
-            m = re.search(r"studio\.youtube\.com/channel/([\w-]+)", tab.url())
-            if m: cid = m.group(1); break
-        except Exception: pass
-        time.sleep(1)
-    if not cid: raise RuntimeError("No detecte tu canal en YouTube Studio. Abri Studio en el Chrome del worker e inicia sesion.")
+    tab = cid = None
+    try:
+        print("Conectando con el Chrome del worker...")
+        tab = cdp.Tab.existente("https://studio.youtube.com") or cdp.Tab.abrir("https://studio.youtube.com")
+        print("Si no iniciaste sesion en YouTube, hacelo en la ventana de Chrome (espero hasta 5 min)...")
+        end = time.time() + 300
+        while time.time() < end:
+            try:
+                m = re.search(r"studio\.youtube\.com/channel/([\w-]+)", tab.url())
+                if m: cid = m.group(1); break
+            except Exception: pass
+            time.sleep(1)
+        if not cid: raise RuntimeError("No detecte tu canal en YouTube Studio. Abri Studio en el Chrome del worker e inicia sesion.")
+    except Exception as e:
+        print("No pude preparar la subida:", e); marcar_fallo(d, pending, "No pude preparar la subida: " + str(e)); return
     for it in pending:
         try:
             check_cancel(it)
@@ -408,11 +446,12 @@ def studio_upload(d, only=None, mode=None):
         except Cancelled:
             it["status"] = "cancelled"; it["stage"] = "Cancelado"; it.pop("publishAt", None)
             print("Cancelado:", it.get("title")); save(d)
-            tab.cerrar(); tab = cdp.Tab.abrir(f"https://studio.youtube.com/channel/{cid}")
+            try: tab.ir(f"https://studio.youtube.com/channel/{cid}")
+            except Exception: pass
         except Exception as e:
-            tab.captura(ROOT / "error-subida.png")
+            tab.captura(ROOT / "error-subida.png"); tab.diagnostico(ROOT / "diagnostico-subida.txt", f"Paso: {STEP[0]}\nError: {e}")
             it["status"] = "ready"; it["pct"] = 100; it["stage"] = "Listo"
-            it["error"] = f"No se pudo subir (paso: {STEP[0]}): {str(e)[:160]}. Captura: worker\\error-subida.png"
+            it["error"] = f"No se pudo subir (paso: {STEP[0]}): {str(e)[:150]}. Detalle en worker\\diagnostico-subida.txt"
             print("No se pudo subir automaticamente:", it["title"], "->", STEP[0], "->", e)
         save(d)
     try: tab.cerrar()
@@ -438,7 +477,7 @@ def main():
         write_plan([i for i in d["items"] if i["status"] == "ready"])
     else:
         try: studio_upload(d)
-        except Exception as e: print("Fallo la subida automatica:", e)
+        except Exception as e: print("Fallo la subida automatica:", e); marcar_fallo(d, d["items"], "Falló la subida: " + str(e))
     print("Listo. Videos terminados en la carpeta media. Plan: plan-publicacion.txt")
 
 def upload_only():
@@ -448,7 +487,7 @@ def upload_only():
     key = sys.argv[sys.argv.index("--subir") + 1]
     mode = sys.argv[sys.argv.index("--modo") + 1] if "--modo" in sys.argv else None
     try: studio_upload(d, None if key == "ALL" else {key}, mode)
-    except Exception as e: print("Fallo la subida:", e)
+    except Exception as e: print("Fallo la subida:", e); marcar_fallo(d, d["items"], "Falló la subida: " + str(e))
     print("Listo.")
 
 if __name__ == "__main__":
