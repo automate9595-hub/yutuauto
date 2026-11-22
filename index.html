@@ -54,6 +54,19 @@
 <label>Intensidad (0.2 a 1.5)<input id="c-fx_power" type="number" min="0.2" max="1.5" step="0.1"></label>
 <label>Empezar en el segundo<input id="c-fx_start" type="number" min="0" step="1"></label>
 <label class="chk"><input id="c-fx_repeat" type="checkbox"> Repetir hasta el final del video</label></div></div>
+<div class="card pad aibox"><h3>Ayuda de IA (opcional) <span class="sub" id="ia-est"></span></h3>
+<p class="sub">Gemini, Grok y Claude se turnan: si uno se queda sin cuota o falla, sigue el siguiente, y si fallan todos la edición continúa igual con tu configuración. La IA trabaja sobre la edición: elige el mejor tramo, los efectos, corrige los subtítulos y escribe título y descripción. Las claves vienen precargadas en worker\claves-ia.json (solo en tu PC; GitHub no permite subirlas). Podés cambiarlas o borrarlas desde acá.</p>
+<div class="aikeys">
+<div class="aik"><b>Gemini</b><input id="k-gemini" type="password" placeholder="Pegá la clave de Gemini" autocomplete="off"><div class="row"><button class="btn pri sm" data-ia="gemini" data-a="save">Guardar</button><button class="btn ghost sm" data-ia="gemini" data-a="test">Probar</button><button class="btn ghost sm danger" data-ia="gemini" data-a="del">Borrar</button></div><small id="ia-gemini" class="sub"></small></div>
+<div class="aik"><b>Grok (xAI)</b><input id="k-grok" type="password" placeholder="Pegá la clave de Grok" autocomplete="off"><div class="row"><button class="btn pri sm" data-ia="grok" data-a="save">Guardar</button><button class="btn ghost sm" data-ia="grok" data-a="test">Probar</button><button class="btn ghost sm danger" data-ia="grok" data-a="del">Borrar</button></div><small id="ia-grok" class="sub"></small></div>
+<div class="aik"><b>Claude (Anthropic)</b><input id="k-claude" type="password" placeholder="Pegá la clave de Claude" autocomplete="off"><div class="row"><button class="btn pri sm" data-ia="claude" data-a="save">Guardar</button><button class="btn ghost sm" data-ia="claude" data-a="test">Probar</button><button class="btn ghost sm danger" data-ia="claude" data-a="del">Borrar</button></div><small id="ia-claude" class="sub"></small></div></div>
+<div class="fxcfg">
+<label>Cómo se turnan<select id="c-ia_mode"><option value="alternar">Alternar las 3 (una por tarea)</option><option value="gemini_primero">Gemini primero, las otras de respaldo</option><option value="grok_primero">Grok primero, las otras de respaldo</option><option value="claude_primero">Claude primero, las otras de respaldo</option><option value="solo_gemini">Solo Gemini</option><option value="solo_grok">Solo Grok</option><option value="solo_claude">Solo Claude</option><option value="apagado">IA apagada</option></select></label>
+<label class="chk"><input id="c-ia_cut" type="checkbox"> Elegir el mejor tramo (Shorts en modo automático)</label>
+<label class="chk"><input id="c-ia_fx" type="checkbox"> Elegir efectos (de los que marqué; si no marqué, de todos)</label>
+<label class="chk"><input id="c-ia_sub" type="checkbox"> Corregir los subtítulos</label>
+<label class="chk"><input id="c-ia_text" type="checkbox"> Escribir título y descripción</label></div>
+<small id="ia-msg" class="sub"></small></div>
 </div></section>
 
 <section id="control"><div class="head"><span class="chip">PASO 4</span><h2>Conectar y ejecutar</h2><p>Conectá tu canal y empezá la edición en el momento.</p></div>
@@ -87,4 +100,4 @@
 <div class="steps"><div class="card step"><i>1</i><b>Descarga</b><p>yt-dlp baja video o playlist.</p></div><div class="card step"><i>2</i><b>Recorte</b><p>Short: 58 s en 9:16. Video: completo.</p></div><div class="card step"><i>3</i><b>Subtítulos</b><p>Whisper transcribe y los quema.</p></div><div class="card step"><i>4</i><b>Publica</b><p>Sube y programa por la API de YouTube.</p></div></div>
 <div class="card pad note"><b>Usá contenido tuyo o con permiso.</b> Resubir videos ajenos viola los términos de YouTube y suele terminar en strikes o monetización denegada.</div></section>
 </main><div id="win" class="win-back" aria-hidden="true"><div class="win" role="dialog" aria-modal="true"><div class="win-bar"><span class="d r" data-close></span><span class="d y" data-close></span><span class="d g"></span><b id="win-title"></b></div><div id="win-body" class="win-body"></div></div></div>
-<footer>Yutu Studio · v4.0</footer><script src="app.js"></script></body></html>
+<footer>Yutu Studio · v8.0</footer><script src="app.js"></script></body></html>

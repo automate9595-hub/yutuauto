@@ -1,5 +1,5 @@
 """Servidor local: conecta la web con el worker (solo 127.0.0.1)."""
-import json, os, pathlib, socket, subprocess, sys, threading, time, urllib.request
+import ia, json, os, pathlib, socket, subprocess, sys, threading, time, urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 ROOT = pathlib.Path(__file__).parent
 MEDIA = ROOT / "media"
@@ -76,7 +76,7 @@ def queue_items():
     global _LAST_ITEMS
     try:
         d = json.loads((ROOT / "queue.json").read_text("utf-8"))
-        _LAST_ITEMS = [dict({k: i.get(k) for k in ("id", "key", "type", "kind", "title", "status", "publishAt", "error", "url", "pct", "stage", "est")},
+        _LAST_ITEMS = [dict({k: i.get(k) for k in ("id", "key", "type", "kind", "title", "status", "publishAt", "error", "url", "pct", "stage", "est", "ia")},
                             hasfile=bool(i.get("id") and (MEDIA / f"{i['id']}_final.mp4").exists())) for i in d.get("items", [])]
     except Exception:
         pass
@@ -177,7 +177,7 @@ class H(BaseHTTPRequestHandler):
         if self.path.startswith("/media/"): return self._media()
         if self._bad_origin(): return self._send({"ok": False}, 403)
         refresh_login()
-        self._send({"ok": True, **state, "log": LOG[-40:], "items": queue_items()})
+        self._send({"ok": True, **state, "log": LOG[-40:], "items": queue_items(), "ia": ia.estado()})
     def do_POST(self):
         if self._bad_origin(): return self._send({"ok": False}, 403)
         n = int(self.headers.get("Content-Length") or 0); data = json.loads(self.rfile.read(n) or b"{}")
@@ -198,6 +198,13 @@ class H(BaseHTTPRequestHandler):
             if want_up and no_up: log("Sin Chrome/Edge: solo preparo los videos.")
             threading.Thread(target=run_job, args=(["--sin-subir"] if no_up else [],), daemon=True).start()
             return self._send({"ok": True, "message": "Editando y subiendo..." if not no_up else "Editando (sin subir)..."})
+        if self.path == "/ia":                       # guarda las claves SOLO en esta PC (claves-ia.json)
+            try: ia.set_claves(data)
+            except Exception as e: return self._send({"ok": False, "message": str(e)})
+            return self._send({"ok": True, "message": "Guardado en tu PC.", "ia": ia.estado()})
+        if self.path == "/ia-test":
+            ok, msg = ia.probar(data.get("proveedor", ""))
+            return self._send({"ok": ok, "message": msg})
         if self.path == "/cancel":
             request_cancel(data.get("key"), bool(data.get("all")))
             return self._send({"ok": True, "message": "Cancelando..." if state["running"] else "Cancelado."})

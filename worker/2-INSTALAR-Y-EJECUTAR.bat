@@ -13,13 +13,17 @@ if errorlevel 1 (
 
 echo Instalando componentes con pip (la primera vez puede tardar unos minutos)...
 python -m pip install -q --disable-pip-version-check -U yt-dlp
-python -m pip install -q --disable-pip-version-check faster-whisper playwright imageio-ffmpeg pystray pillow
+python -m pip install -q --disable-pip-version-check imageio-ffmpeg pystray pillow
 if errorlevel 1 (
   echo.
   echo ERROR: pip no pudo instalar los componentes. Revisa tu conexion y ejecuta este archivo de nuevo.
   pause
   exit /b 1
 )
+
+echo Instalando voz para subtitulos (si alguno falla, el worker usa el otro)...
+python -m pip install -q --disable-pip-version-check faster-whisper
+python -m pip install -q --disable-pip-version-check vosk
 
 echo Iniciando el worker en segundo plano...
 start "" pythonw "%~dp0bandeja.pyw"

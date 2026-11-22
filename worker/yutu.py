@@ -1,6 +1,6 @@
 """Yutu worker: descarga -> recorte -> efectos -> subtitulos -> subida a YouTube Studio (sin Google Cloud)."""
 import json, math, os, re, shutil, subprocess, sys, time, pathlib, datetime as dt
-import efectos
+import efectos, ia, voz, cdp
 ROOT = pathlib.Path(__file__).parent
 MEDIA = ROOT / "media"; MEDIA.mkdir(exist_ok=True)
 QF = ROOT / "queue.json"; CF = ROOT / "cancel.json"
@@ -20,14 +20,18 @@ def cancel_requested(it):
 def check_cancel(it):
     if cancel_requested(it): raise Cancelled()
 
+def ia_activa(cfg):
+    return cfg.get("ia_mode", "alternar") != "apagado" and any(ia.estado()[k] for k in ("gemini", "grok"))
+
 def make_plan(cfg, upload):
-    w = {"dl": .20, "sub": .20 if cfg.get("sub", True) else 0, "edit": .40, "up": .20 if upload else 0}
+    w = {"dl": .20, "ia": .08 if (ia_activa(cfg) and cfg.get("ia_cut")) else 0,
+         "sub": .20 if cfg.get("sub", True) else 0, "edit": .40, "up": .20 if upload else 0}
     tot = sum(w.values()); acc = 0; plan = {}
-    for k in ("dl", "sub", "edit", "up"):
+    for k in ("dl", "ia", "sub", "edit", "up"):
         plan[k] = (acc / tot, w[k] / tot); acc += w[k]
     return plan
 
-LABEL = {"dl": "Descargando", "sub": "Subtitulos", "edit": "Editando", "up": "Subiendo"}
+LABEL = {"dl": "Descargando", "ia": "Analizando con IA", "sub": "Subtitulos", "edit": "Editando", "up": "Subiendo"}
 def set_prog(it, stage, frac, force=False):
     off, wt = PLAN.get(stage, (0, 1))
     pct = int(round(100 * (off + wt * max(0.0, min(1.0, frac)))))
@@ -90,23 +94,10 @@ def srt_time(s):
     h, m, sec = int(s // 3600), int(s % 3600 // 60), s % 60
     return f"{h:02}:{m:02}:{sec:06.3f}".replace(".", ",")
 
-_MODEL = {}
-def whisper_model(name):
-    if name not in _MODEL:
-        from faster_whisper import WhisperModel
-        _MODEL[name] = WhisperModel(name, compute_type="int8")
-    return _MODEL[name]
-
 def subtitles(it, src, start, length, cfg, short):
     """Transcribe solo el tramo elegido y arma subtitulos cortos (estilo Shorts)."""
-    wav = MEDIA / (src.stem + "_audio.wav")
-    run(FFMPEG, "-loglevel", "error", "-y", "-ss", start, "-t", length, "-i", src, "-vn", "-ac", 1, "-ar", 16000, wav)
-    lang = cfg.get("lang", "es")
-    segs, _ = whisper_model(cfg.get("model", "small")).transcribe(
-        str(wav), language=None if lang == "auto" else lang, vad_filter=True, word_timestamps=True)
-    words = []
-    for sg in segs:
-        check_cancel(it); words += list(sg.words or []); set_prog(it, "sub", sg.end / max(length, 1))
+    words = voz.palabras(FFMPEG, src, start, length, cfg.get("lang", "es"), cfg.get("model", "small"),
+                         lambda f: set_prog(it, "sub", f), lambda: check_cancel(it))
     set_prog(it, "sub", 1.0, True)
     maxw = int(cfg.get("sub_words") or (4 if short else 8))
     caps, cur = [], []
@@ -117,15 +108,34 @@ def subtitles(it, src, start, length, cfg, short):
         cur.append(w)
         if w.word.strip()[-1:] in ".?!": flush()
     flush()
-    wav.unlink(missing_ok=True)
     if not caps: return None
+    if ia_activa(cfg) and cfg.get("ia_sub"):
+        txt = [c[2] for c in caps]; mejor = txt[:]; prov = None
+        for i in range(0, min(len(txt), 600), 120):                  # lotes: asi se turnan las IAs
+            check_cancel(it)
+            r = ia.corregir_subs(cfg.get("ia_mode", "alternar"), it.get("title", ""), txt[i:i + 120])
+            if r: mejor[i:i + 120] = r["lineas"]; prov = r["prov"]
+        if prov:
+            caps = [(a, b, mejor[k]) for k, (a, b, _) in enumerate(caps)]; it["_sub_ia"] = prov
+            print(f"  [IA {prov}] Subtitulos corregidos.")
     srt = MEDIA / (src.stem + ".srt")
     with open(srt, "w", encoding="utf-8") as f:
         for i, (a, b, t) in enumerate(caps, 1):
             f.write(f"{i}\n{srt_time(a)} --> {srt_time(max(b, a + 0.3))}\n{t.upper() if cfg.get('sub_caps') else t}\n\n")
     return srt
 
-def window(it, cfg, dur):
+def transcribe_full(it, src, cfg, dur):
+    """Transcripcion de todo el video, solo para que la IA elija el mejor tramo."""
+    words = voz.palabras(FFMPEG, src, 0, dur, cfg.get("lang", "es"), "base",
+                         lambda f: set_prog(it, "ia", f), lambda: check_cancel(it))
+    return voz.frases(words)
+
+def srt_text(srt):
+    if not srt: return ""
+    try: return " ".join(l.strip() for l in pathlib.Path(srt).read_text("utf-8").splitlines() if l.strip() and not l.strip().isdigit() and "-->" not in l)
+    except Exception: return ""
+
+def window(it, cfg, dur, ai_start=None):
     """Tramo del video original que se conserva: (inicio, duracion)."""
     f = lambda k, d=0: float(cfg.get(k) or d)
     if it["kind"] == "short":
@@ -133,9 +143,11 @@ def window(it, cfg, dur):
         mode = cfg.get("cut_mode", "auto")
         if mode == "inicio" or dur <= L: start = 0
         elif mode == "manual": start = min(f("cut_start"), dur - L)
+        elif ai_start is not None: start = min(max(ai_start, 0), dur - L)
         else: start = min(dur * 0.1, dur - L)
     else:
         start = min(max(f("vid_start"), 0), max(dur - 1, 0)) if cfg.get("vid_trim") else 0
+        if ai_start is not None and cfg.get("vid_trim") and f("vid_start") == 0: start = min(max(ai_start, 0), max(dur - 1, 0))
         L = dur - start
         if cfg.get("vid_trim") and f("vid_len") > 0: L = min(L, f("vid_len") * 60)
     return max(start, 0), max(L, 1)
@@ -200,6 +212,21 @@ def process(it, cfg):
     else: set_prog(it, "dl", 1.0, True)
     check_cancel(it)
     start, L = window(it, cfg, dur)
+    modo, ayuda = cfg.get("ia_mode", "alternar"), []
+    if ia_activa(cfg) and cfg.get("ia_cut") and dur > L + 2 and dur <= 1800 and not it.get("_noia"):
+        elegible = (short and cfg.get("cut_mode", "auto") == "auto") or (not short and cfg.get("vid_trim") and float(cfg.get("vid_len") or 0) > 0 and not float(cfg.get("vid_start") or 0))
+        if elegible:
+            print("  [IA] Buscando el mejor tramo...")
+            try:
+                segs = transcribe_full(it, src, cfg, dur)
+                r = ia.momento(modo, it["title"], segs, dur, L) if segs else None
+                if r:
+                    start, L = window(it, cfg, dur, r["inicio"]); ayuda.append("corte " + r["prov"])
+                    print(f"  [IA {r['prov']}] Tramo elegido desde {start:.0f}s. {r['motivo']}")
+                else: print("  [IA] Sin sugerencia útil: uso el corte normal.")
+            except Cancelled: raise
+            except Exception as e: print("  [IA] No se pudo analizar:", str(e)[:150])
+        set_prog(it, "ia", 1.0, True)
     print(f"  Tramo: {start:.0f}s -> {start + L:.0f}s ({L:.0f}s de {dur:.0f}s)")
     srt = None
     if cfg.get("sub", True):
@@ -207,9 +234,19 @@ def process(it, cfg):
         try: srt = subtitles(it, src, start, L, cfg, short)
         except Cancelled: raise
         except Exception as e: print("  Sin subtitulos:", str(e)[:200])
+    texto = srt_text(srt)
+    if it.get("_sub_ia"): ayuda.append("subtítulos " + it.pop("_sub_ia"))
+    ecfg = cfg
+    if ia_activa(cfg) and cfg.get("ia_fx"):
+        permitidos = [k for k in (cfg.get("fx_list") or []) if k in efectos.EFECTOS] or list(efectos.EFECTOS)
+        r = ia.efecto_plan(modo, it["title"], texto, it["kind"], L, permitidos)
+        if r:
+            ecfg = dict(cfg, fx_list=r["fx_list"], fx_mode=r["fx_mode"], fx_dur=r["fx_dur"], fx_power=r["fx_power"])
+            ayuda.append("efectos " + r["prov"]); print(f"  [IA {r['prov']}] Efectos: {', '.join(r['fx_list'])} ({r['fx_mode']}). {r['motivo']}")
+        else: print("  [IA] Sin sugerencia de efectos: uso los tuyos.")
     final = MEDIA / f"{vid}_final.mp4"
     print("  [3/3] Editando video...")
-    vf, af = build_vf(cfg, short, L, srt), build_af(cfg, L)
+    vf, af = build_vf(ecfg, short, L, srt), build_af(ecfg, L)
     if not short and not vf.replace("setsar=1", "").strip(",") and not af and start == 0 and L >= dur - 1:
         shutil.copy(src, final); set_prog(it, "edit", 1.0, True)   # completo y sin efectos: no se recodifica
     else:
@@ -217,7 +254,11 @@ def process(it, cfg):
         except subprocess.CalledProcessError as e:
             if srt is None: raise RuntimeError("FFmpeg: " + str(e.output)[:200])
             print("  FFmpeg no pudo quemar subtitulos; reintento sin ellos.")
-            encode(it, src, start, L, build_vf(cfg, short, L, None), af, final)
+            encode(it, src, start, L, build_vf(ecfg, short, L, None), af, final)
+    if ia_activa(cfg) and cfg.get("ia_text"):
+        r = ia.textos(modo, it["title"], texto, it["kind"])
+        if r: it["ia_title"], it["ia_desc"] = r["titulo"], r["descripcion"]; ayuda.append("título " + r["prov"]); print(f"  [IA {r['prov']}] Título: {r['titulo']}")
+    it["ia"] = " · ".join(ayuda)
     it["file"] = str(final); it["status"] = "ready"
     if not PLAN.get("up", (0, 0))[1]: it["pct"] = 100; it["stage"] = "Listo"
     save(D)
@@ -245,86 +286,137 @@ def write_plan(items):
         lines.append(f"{when} | {it['kind']:5} | {it.get('title','')} | {it.get('file','')}")
     (ROOT / "plan-publicacion.txt").write_text("\n".join(lines), "utf-8")
 
-def up_progress(page, it, t0, size_mb):
+STEP = [""]
+def paso(msg): STEP[0] = msg; print("  Subida:", msg)
+
+def up_progress(tab, it, t0, size_mb):
     """Porcentaje de subida: lo lee de Studio si puede; si no, lo estima (marcado con ~)."""
     frac = None
     try:
-        txt = page.locator("ytcp-video-upload-progress").first.inner_text(timeout=400)
+        txt = tab.texto("ytcp-video-upload-progress")
         m = re.search(r"(\d{1,3})\s*%", txt)
         if m: frac = min(int(m.group(1)), 100) / 100; it["est"] = False
-        elif re.search(r"upload complete|checks complete|finished", txt, re.I): frac = 1.0; it["est"] = False
+        elif re.search(r"upload complete|checks complete|finished|completad|finaliz|terminad", txt, re.I): frac = 1.0; it["est"] = False
     except Exception: pass
     if frac is None:
         tau = max(8.0, size_mb / 2.0)               # ~2 MB/s
         frac = min(0.95, 1 - math.exp(-(time.time() - t0) / tau)); it["est"] = True
     set_prog(it, "up", frac)
 
-def studio_upload_one(page, it):
-    from playwright.sync_api import TimeoutError as PWTimeout
-    title = it["title"] + (" #Shorts" if it["kind"] == "short" else "")
+MESES_ES = ["ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sept", "oct", "nov", "dic"]
+MESES_EN = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+def fmt_fecha(actual, w):
+    """Escribe la fecha igual que la muestra tu Studio (español o inglés)."""
+    m = re.match(r"^\s*(\d{1,2})\s+([^\s\d,.]+)\.?\s+(\d{4})\s*$", actual)
+    if m:
+        es = m.group(2).lower() in [x.lower() for x in MESES_ES] + ["sep", "sept"]
+        return f"{w.day} {(MESES_ES if es else MESES_EN)[w.month - 1]} {w.year}"
+    if re.match(r"^\s*[A-Za-z]{3,4}\.?\s+\d{1,2},\s+\d{4}\s*$", actual): return f"{MESES_EN[w.month - 1]} {w.day}, {w.year}"
+    raise RuntimeError("No reconozco el formato de fecha de Studio: " + actual[:30])
+
+def fmt_hora(actual, w):
+    m = re.search(r"([ap])\.?\s?m\.?", actual, re.I)
+    if not m: return f"{w.hour}:{w.minute:02d}"
+    h = w.hour % 12 or 12; am = w.hour < 12
+    if "." in actual: return f"{h}:{w.minute:02d} {'a. m.' if am else 'p. m.'}"
+    return f"{h}:{w.minute:02d} {'AM' if am else 'PM'}"
+
+def campo_valor(tab, sel):
+    return tab.eval(f"(function(){{var e=window.__D({json.dumps(sel)});return e?e.value||'':''}})()") or ""
+
+def studio_upload_one(tab, cid, it):
+    title = (it.get("ia_title") or it["title"]) + (" #Shorts" if it["kind"] == "short" else "")
+    desc = it.get("ia_desc") or it["title"]
     now_mode = not it.get("publishAt")
     when = None if now_mode else local(it["publishAt"])
-    size_mb = os.path.getsize(it["file"]) / 1048576; t0 = time.time()
+    size_mb = os.path.getsize(it["file"]) / 1048576
+    chk = lambda: check_cancel(it)
     it["status"] = "uploading"; it.pop("error", None); set_prog(it, "up", 0.0, True)
-    page.goto("https://studio.youtube.com", wait_until="domcontentloaded")
-    page.click("#create-icon"); page.click("#text-item-0")
-    page.wait_for_selector("input[type=file]", state="attached", timeout=60000)
-    page.set_input_files("input[type=file]", it["file"])
-    t0 = time.time(); check_cancel(it)
-    page.wait_for_selector("#textbox", timeout=120000)
-    up_progress(page, it, t0, size_mb)
-    box = page.locator("#textbox")
-    box.nth(0).click(); page.keyboard.press("Control+A"); page.keyboard.type(title[:100])
-    box.nth(1).click(); page.keyboard.type(f"{title}\n\nFuente: {it['url']}")
-    page.locator("[name='VIDEO_MADE_FOR_KIDS_NOT_MADE_FOR_KIDS']").click()
-    for _ in range(3):
-        check_cancel(it); up_progress(page, it, t0, size_mb)
-        page.click("#next-button"); page.wait_for_timeout(1500)
+    paso("abriendo el cuadro de subida de Studio")
+    tab.ir(f"https://studio.youtube.com/channel/{cid}/videos/upload?d=ud")
+    if not tab.esperar("input[type=file]", 25, chk):
+        paso("abriendo Crear > Subir videos")
+        tab.ir(f"https://studio.youtube.com/channel/{cid}")
+        tab.esperar("#create-icon", 20, chk)
+        if not (tab.existe("#create-icon") and (tab.clic("#create-icon") or True)): raise RuntimeError("No encuentro el botón Crear de Studio")
+        time.sleep(1)
+        if not tab.clic_texto(r"^(subir v[ií]deos?|upload videos?)$"): tab.clic("#text-item-0")
+        if not tab.esperar("input[type=file]", 30, chk): raise RuntimeError("No apareció el selector de archivos de Studio")
+    paso("enviando el archivo de video")
+    tab.archivos("input[type=file]", [it["file"]]); t0 = time.time()
+    paso("esperando el formulario de detalles")
+    end = time.time() + 120
+    while tab.cuantos("#textbox") < 2:
+        chk()
+        if time.time() > end: raise RuntimeError("Studio no mostró el formulario de título y descripción")
+        time.sleep(1)
+    up_progress(tab, it, t0, size_mb)
+    paso("escribiendo título y descripción")
+    tab.escribir("#textbox", title[:100], 0); time.sleep(0.4)
+    tab.escribir("#textbox", f"{desc}\n\nFuente: {it['url']}", 1); time.sleep(0.4)
+    paso("marcando 'no es para niños'")
+    tab.clic("[name='VIDEO_MADE_FOR_KIDS_NOT_MADE_FOR_KIDS']", 0, 20)
+    for n in (1, 2, 3):
+        chk(); up_progress(tab, it, t0, size_mb); paso(f"avanzando ({n}/3)")
+        tab.clic("#next-button", 0, 20); time.sleep(1.8)
     if now_mode:
-        page.locator("tp-yt-paper-radio-button[name='PUBLIC']").click()
+        paso("eligiendo publicar ahora (Público)")
+        tab.clic("tp-yt-paper-radio-button[name='PUBLIC']", 0, 20)
     else:
-        page.click("#second-container-expand-button")
-        page.locator("ytcp-date-picker input").first.fill(when.strftime("%b %d, %Y")); page.keyboard.press("Enter")
-        page.locator("#time-of-day-container input").first.fill(when.strftime("%I:%M %p").lstrip("0")); page.keyboard.press("Enter")
-    end = time.time() + 1200                       # espera a que termine la subida, mostrando el avance
+        paso("programando la fecha")
+        tab.clic("#second-container-expand-button", 0, 20); time.sleep(1)
+        tab.escribir("ytcp-date-picker input", fmt_fecha(campo_valor(tab, "ytcp-date-picker input"), when)); tab.tecla("Enter", 13); time.sleep(0.6)
+        tab.escribir("#time-of-day-container input", fmt_hora(campo_valor(tab, "#time-of-day-container input"), when)); tab.tecla("Enter", 13); time.sleep(0.6)
+    paso("esperando a que termine la subida")
+    end = time.time() + 1500
     while True:
-        check_cancel(it); up_progress(page, it, t0, size_mb)
-        try: page.locator("#done-button").click(timeout=1500); break
-        except PWTimeout:
-            if time.time() > end: raise
-    page.wait_for_timeout(4000)
-    it["status"] = "published" if now_mode else "scheduled"; it["pct"] = 100; it["stage"] = "Publicado" if now_mode else "Programado"; it.pop("est", None)
+        chk(); up_progress(tab, it, t0, size_mb)
+        listo = tab.eval("(function(){var b=window.__D('#done-button');return !!b&&!b.hasAttribute('disabled')&&b.getAttribute('aria-disabled')!=='true'})()")
+        if listo: break
+        if time.time() > end: raise RuntimeError("La subida tardó más de 25 minutos")
+        time.sleep(1.5)
+    paso("publicando")
+    tab.clic("#done-button"); time.sleep(5)
+    if tab.existe("#close-button"):
+        try: tab.clic("#close-button")
+        except Exception: pass
+    it["status"] = "published" if now_mode else "scheduled"; it["pct"] = 100
+    it["stage"] = "Publicado" if now_mode else "Programado"; it.pop("est", None)
 
 def studio_upload(d, only=None, mode=None):
-    from playwright.sync_api import sync_playwright
     pending = [i for i in d["items"] if i["status"] == "ready" and (only is None or i["key"] in only)]
     if not pending: print("No hay videos listos para subir."); return
     now_mode = (mode or d.get("config", {}).get("publish")) == "now"
     for it in pending:
         it.pop("publishAt", None) if now_mode else it.__setitem__("publishAt", next_slot(d, it["kind"]))
     write_plan(pending); save(d)
-    with sync_playwright() as p:
-        browser = p.chromium.connect_over_cdp("http://127.0.0.1:9222")
-        page = browser.contexts[0].new_page()
-        page.goto("https://studio.youtube.com", wait_until="domcontentloaded")
-        print("Si no iniciaste sesion en YouTube, hacelo en la ventana de Chrome (espero hasta 5 min)...")
-        if not wait_login(page, 300):
-            raise RuntimeError("No detecte tu sesion en YouTube Studio (pagina actual: " + page.url + ")")
-        for it in pending:
-            try:
-                check_cancel(it)
-                studio_upload_one(page, it); print("Subido:", it["title"], it.get("publishAt") or "publicado ahora")
-            except Cancelled:
-                it["status"] = "cancelled"; it["stage"] = "Cancelado"; it.pop("publishAt", None)
-                print("Cancelado:", it.get("title")); save(d)
-                try: page.close(run_before_unload=False)
-                except Exception: pass
-                page = browser.contexts[0].new_page()
-            except Exception as e:
-                it["status"] = "ready"; it["pct"] = 100; it["stage"] = "Listo"
-                it["error"] = "Subir a mano (ver plan-publicacion.txt): " + str(e)[:200]
-                print("No se pudo subir automaticamente:", it["title"], "->", e)
-            save(d)
+    print("Conectando con el Chrome del worker...")
+    tab = cdp.Tab.abrir("https://studio.youtube.com")
+    print("Si no iniciaste sesion en YouTube, hacelo en la ventana de Chrome (espero hasta 5 min)...")
+    cid, end = None, time.time() + 300
+    while time.time() < end:
+        try:
+            m = re.search(r"studio\.youtube\.com/channel/([\w-]+)", tab.url())
+            if m: cid = m.group(1); break
+        except Exception: pass
+        time.sleep(1)
+    if not cid: raise RuntimeError("No detecte tu canal en YouTube Studio. Abri Studio en el Chrome del worker e inicia sesion.")
+    for it in pending:
+        try:
+            check_cancel(it)
+            studio_upload_one(tab, cid, it); print("Subido:", it["title"], it.get("publishAt") or "publicado ahora")
+        except Cancelled:
+            it["status"] = "cancelled"; it["stage"] = "Cancelado"; it.pop("publishAt", None)
+            print("Cancelado:", it.get("title")); save(d)
+            tab.cerrar(); tab = cdp.Tab.abrir(f"https://studio.youtube.com/channel/{cid}")
+        except Exception as e:
+            tab.captura(ROOT / "error-subida.png")
+            it["status"] = "ready"; it["pct"] = 100; it["stage"] = "Listo"
+            it["error"] = f"No se pudo subir (paso: {STEP[0]}): {str(e)[:160]}. Captura: worker\\error-subida.png"
+            print("No se pudo subir automaticamente:", it["title"], "->", STEP[0], "->", e)
+        save(d)
+    try: tab.cerrar()
+    except Exception: pass
 
 def main():
     global D, PLAN
@@ -359,32 +451,5 @@ def upload_only():
     except Exception as e: print("Fallo la subida:", e)
     print("Listo.")
 
-def logged_in(page):
-    u = page.url
-    if "studio.youtube.com/channel/" in u: return True
-    return "studio.youtube.com" in u and page.locator("#create-icon, #upload-icon").count() > 0
-
-def wait_login(page, secs):
-    end = time.time() + secs
-    while time.time() < end:
-        try:
-            if logged_in(page): return True
-        except Exception: pass
-        page.wait_for_timeout(1000)
-    return False
-
-def estado():
-    try:
-        from playwright.sync_api import sync_playwright
-        with sync_playwright() as p:
-            ctx = p.chromium.connect_over_cdp("http://127.0.0.1:9222").contexts[0]
-            for pg in ctx.pages:
-                if "studio.youtube.com/channel/" in pg.url: print("LOGIN_OK"); return
-            page = ctx.new_page(); page.goto("https://studio.youtube.com", wait_until="domcontentloaded")
-            ok = wait_login(page, 15); url = page.url; page.close()
-            print("LOGIN_OK" if ok else "LOGIN_NO pagina=" + url[:120])
-    except Exception as e:
-        print("LOGIN_NO error=" + str(e)[:160])
-
 if __name__ == "__main__":
-    estado() if "--estado" in sys.argv else main()
+    main()

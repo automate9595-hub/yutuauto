@@ -5,7 +5,8 @@ const DEF={sn:3,st:"09:00,14:00,20:00",vn:2,vt:"12:00,18:00",publish:"schedule",
 sub:true,lang:"es",model:"small",sub_pos:"bottom",sub_size:"m",sub_color:"white",sub_words:"",sub_caps:false,
 cut_mode:"auto",cut_start:0,short_len:58,frame:"crop",vid_trim:false,vid_start:0,vid_len:0,
 fx_list:[],fx_mode:"seq",fx_dur:3,fx_gap:0,fx_blend:0.6,fx_power:1,fx_start:0,fx_repeat:true,
-vivid:false,vignette:false,fade:false,loudnorm:false};
+vivid:false,vignette:false,fade:false,loudnorm:false,
+ia_mode:"alternar",ia_cut:true,ia_fx:true,ia_sub:true,ia_text:true};
 let cfg=Object.assign({},DEF,load(C,{}));
 function parse(raw){try{const u=new URL(raw.trim()),h=u.hostname.replace(/^www\./,"").toLowerCase();
 if(!["youtube.com","m.youtube.com","music.youtube.com","youtu.be"].includes(h))return null;
@@ -66,7 +67,7 @@ $("open-guide").onclick=()=>openWin("Guía de activación",`<ol><li>Ejecutá <co
 
 /* worker local */
 const API="http://127.0.0.1:8765";
-async function call(path,body){const c=new AbortController(),t=setTimeout(()=>c.abort(),4000);
+async function call(path,body,ms=4000){const c=new AbortController(),t=setTimeout(()=>c.abort(),ms);
 try{const r=await fetch(API+path,body?{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body),signal:c.signal}:{signal:c.signal});return await r.json()}catch{return null}finally{clearTimeout(t)}}
 const setPill=(id,s,t)=>{const e=$(id);e.className="pill "+s;e.lastChild.textContent=t};
 let running=false;
@@ -75,7 +76,7 @@ if(!document.hidden){const s=await call("/status");
 if(!s){setPill("p-worker","","Worker apagado");setPill("p-yt","","Canal sin conectar");running=false;$("start").disabled=$("start-up").disabled=false}
 else{running=s.running;setPill("p-worker","ok","Worker conectado");
 setPill("p-yt",s.youtube?"ok":"",s.youtube?"Canal conectado":"Canal sin conectar");
-$("yt-detail").textContent=s.youtube?"":(s.detail||"");pubRender(s.items||[]);$("log").textContent=s.log.length?s.log.join("\n"):"Sin actividad todavía.";$("log").scrollTop=1e9;$("start").disabled=$("start-up").disabled=s.running;
+$("yt-detail").textContent=s.youtube?"":(s.detail||"");pubRender(s.items||[]);if(s.ia)iaTxt(s.ia);$("log").textContent=s.log.length?s.log.join("\n"):"Sin actividad todavía.";$("log").scrollTop=1e9;$("start").disabled=$("start-up").disabled=s.running;
 $("start").textContent=s.running?"Procesando…":"Comenzar proceso (solo editar) ▶";$("start-up").textContent=s.running?"Procesando…":"Comenzar proceso, automatizar y subir ahora ⚡"}}
 setTimeout(poll,running?1500:7000)}
 const note=(t,err)=>{const m=$("ctl-msg");m.textContent=t;m.className="msg"+(err?" err":"")};
@@ -97,11 +98,16 @@ const acts=[x.hasfile?`<button class="btn ghost sm" data-act="prev" data-k="${k}
 st==="ready"?`<button class="btn pri sm" data-act="now" data-k="${k}">Subir ahora ⚡</button><button class="btn ghost sm" data-act="sched" data-k="${k}">Programar</button>`:"",
 BUSY.includes(st)?`<button class="btn ghost sm danger" data-act="cancel" data-k="${k}">Cancelar</button>`:""].join("");
 return `<div class="pc">${x.type==="video"?`<img loading="lazy" src="https://i.ytimg.com/vi/${esc(x.id||"")}/mqdefault.jpg" alt="" onerror="this.style.visibility='hidden'">`:""}<div><b>${esc(x.title||x.url||"")}</b><span class="st ${esc(st)}">${ST[st]||esc(st)}</span><small>${x.kind==="short"?"Short":"Video"}${x.publishAt?" · "+new Date(x.publishAt).toLocaleString("es",{dateStyle:"medium",timeStyle:"short"}):""}</small>
-<div class="pg ${esc(st)}"><i style="width:${pct}%"></i></div><small class="pgt">${label}</small>${x.error?`<small class="err">${esc(x.error)}</small>`:""}${acts?`<div class="acts">${acts}</div>`:""}</div></div>`}).join("")}
+<div class="pg ${esc(st)}"><i style="width:${pct}%"></i></div><small class="pgt">${label}</small>${x.ia?`<small class="pgt">Ayuda IA: ${esc(x.ia)}</small>`:""}${x.error?`<small class="err">${esc(x.error)}</small>`:""}${acts?`<div class="acts">${acts}</div>`:""}</div></div>`}).join("")}
 $("pub").onclick=async e=>{const b=e.target.closest("[data-act]");if(!b)return;const k=b.dataset.k,a=b.dataset.act,x=q.find(y=>y.key===k)||{};
 if(a==="prev"){const id=k.split(":")[1];openWin("Vista previa del video editado",`<video controls autoplay playsinline style="width:100%;max-height:70vh;border-radius:10px;background:#000" src="${API}/media/${encodeURIComponent(id)}_final.mp4"></video><p class="sub">Es el archivo ya editado, tal como se va a subir.</p>`);return}
 if(a==="cancel"){const r=await call("/cancel",{key:k});note(r?r.message:"No encuentro el worker.",!r);poll();return}
 const r=await call("/upload",{key:k,mode:a==="now"?"now":"schedule",config:cfg});note(r?r.message:"No encuentro el worker.",!r||!r.ok);poll()};
+const iaTxt=s=>{["gemini","grok","claude"].forEach(p=>{$("ia-"+p).textContent=s[p]?"Clave guardada en tu PC ✓":"Sin clave"});$("ia-est").textContent="· "+(s.gemini||s.grok||s.claude?(s.ultimo?"última ayuda: "+s.ultimo:"lista"):"sin claves")};
+document.querySelectorAll("[data-ia]").forEach(b=>b.onclick=async()=>{const p=b.dataset.ia,a=b.dataset.a,m=$("ia-msg");m.textContent="";
+if(a==="save"){const v=$("k-"+p).value.trim();if(!v){m.textContent="Pegá la clave primero.";return}const r=await call("/ia",{[p]:v});$("k-"+p).value="";m.textContent=r?r.message:"No encuentro el worker.";if(r&&r.ia)iaTxt(r.ia)}
+if(a==="del"){const r=await call("/ia",{borrar:p});m.textContent=r?"Clave borrada.":"No encuentro el worker.";if(r&&r.ia)iaTxt(r.ia)}
+if(a==="test"){m.textContent="Probando…";const r=await call("/ia-test",{proveedor:p},50000);m.textContent=r?r.message:"No encuentro el worker."}});
 $("cancel-all").onclick=async()=>{if(!confirm("¿Cancelar todo lo que está en proceso?"))return;const r=await call("/cancel",{all:true});note(r?r.message:"No encuentro el worker.",!r);poll()};
 document.querySelectorAll(".js-upall").forEach(b=>b.onclick=async()=>{const r=await call("/upload",{key:"ALL",mode:"now",config:cfg});note(r?r.message:"No encuentro el worker.",!r||!r.ok);poll()});
 $("force").onclick=async()=>{const r=await call("/forzar",{});note(r?r.message:"No encuentro el worker.",!r);poll()};

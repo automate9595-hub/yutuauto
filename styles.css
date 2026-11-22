@@ -96,3 +96,6 @@ body{background:radial-gradient(ellipse at 0 0,#14382f55,transparent 45%),radial
 .pg.processing i,.pg.uploading i{background:linear-gradient(90deg,#4468ff,#7aa5ff)}.pg.error i,.pg.cancelled i{background:#6b4a52}
 .pgt{display:block;color:var(--mu)}.pc .err{color:var(--red)}.acts{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
 .st.uploading{background:#1d2c55;color:var(--blue)}.st.cancelled{background:#3a2530;color:var(--red)}
+.aibox{grid-column:1/-1;display:grid;gap:14px}.aibox h3{margin:0}
+.aikeys{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:14px}.aik{display:grid;gap:8px}
+.aik input{width:100%}.aik .row{margin:0}
