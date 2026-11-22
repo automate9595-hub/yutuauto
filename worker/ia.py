@@ -13,6 +13,8 @@ TIMEOUT = 30
 NOMBRE = {"gemini": "Gemini", "groq": "Groq", "claude": "Claude"}
 CICLO = ["gemini", "groq", "claude"]
 _groq_modelos = [None]
+_gem_modelos = [None]
+USADO = {}          # ultimo modelo que respondio, por proveedor (para mostrarlo en la web)
 _HASTA = [None]       # limite de tiempo total para la prueba del boton 'Probar'
 
 # ---------- claves (nunca se devuelven a la web)
@@ -25,7 +27,8 @@ def guardar(d):
 
 def estado():
     d = cargar()
-    return {"gemini": bool(d.get("gemini")), "groq": bool(d.get("groq")), "claude": bool(d.get("claude")), "ultimo": NOMBRE.get(d.get("ultimo"), "")}
+    return {"gemini": bool(d.get("gemini")), "groq": bool(d.get("groq")), "claude": bool(d.get("claude")), "ultimo": NOMBRE.get(d.get("ultimo"), ""),
+            "modelo_gemini": d.get("modelo_gemini", ""), "modelo_usado": dict(USADO)}
 
 def set_claves(data):
     d = cargar()
@@ -35,10 +38,18 @@ def set_claves(data):
             if len(v) > 300 or re.search(r"\s", v): raise ValueError("La clave no parece válida (tiene espacios).")
             d[p] = v
     if data.get("borrar") in CICLO: d.pop(data["borrar"], None)
+    if "modelo_gemini" in data:                      # "" = automatico (el Flash Lite mas nuevo)
+        m = str(data.get("modelo_gemini") or "").strip().removeprefix("models/")
+        if m and not re.fullmatch(r"[\w.\-]{3,80}", m): raise ValueError("El nombre del modelo no parece válido (ej: gemini-flash-lite-latest).")
+        if m: d["modelo_gemini"] = m
+        else: d.pop("modelo_gemini", None)
+        _gem_modelos[0] = None
+    d.pop("caida", None) if any(str(data.get(p) or "").strip() for p in CICLO) else None   # clave nueva: vuelve a intentar
     guardar(d)
 
 # ---------- HTTP
-MODELOS_GEMINI = ["gemini-2.5-flash", "gemini-flash-latest", "gemini-2.5-flash-lite"]
+# Orden de preferencia: Flash Lite mas nuevo (se descubre solo con la clave) -> alias -> Flash.
+RESPALDO_GEMINI = ["gemini-flash-lite-latest", "gemini-2.5-flash-lite", "gemini-flash-latest", "gemini-2.5-flash"]
 
 def _http(url, body=None, headers=None):
     h = {"Content-Type": "application/json", "User-Agent": "Yutu-Worker/1.0"}; h.update(headers or {})
@@ -58,21 +69,44 @@ def _http(url, body=None, headers=None):
         if isinstance(e.reason, (socket.timeout, TimeoutError)): raise RuntimeError("Tiempo de espera agotado")
         raise RuntimeError("Sin conexión con el servicio: " + str(e.reason)[:80])
 
+def _version(nombre):
+    m = re.search(r"gemini-(\d+(?:\.\d+)?)", nombre)
+    return float(m.group(1)) if m else 0.0
+
+def _modelos_gemini(d):
+    """Lista de modelos a probar, en orden. Si elegiste uno en la web, solo ese (y luego el respaldo)."""
+    if d.get("modelo_gemini"): return [d["modelo_gemini"]] + [m for m in RESPALDO_GEMINI if m != d["modelo_gemini"]]
+    if _gem_modelos[0]: return _gem_modelos[0]
+    lista = []
+    try:
+        r = _http("https://generativelanguage.googleapis.com/v1beta/models?pageSize=200", None, {"x-goog-api-key": d["gemini"]})
+        ids = [m["name"].removeprefix("models/") for m in r.get("models", []) if "generateContent" in m.get("supportedGenerationMethods", [])]
+        lite = [i for i in ids if re.search(r"flash-lite", i) and not re.search(r"preview-tts|tts|image|live|audio|embed|exp", i)]
+        lite.sort(key=lambda i: (-_version(i), "preview" in i, len(i)))       # el numero mas alto primero; los estables antes que preview
+        lista = lite[:3]
+    except Exception as e:
+        print("  IA Gemini: no pude listar modelos, uso los de respaldo (" + str(e)[:60] + ")")
+    lista += [m for m in RESPALDO_GEMINI if m not in lista]
+    _gem_modelos[0] = lista
+    return lista
+
 def _gemini(prompt, d):
     cuerpo = {"contents": [{"role": "user", "parts": [{"text": prompt}]}],
               "generationConfig": {"temperature": 0.4, "responseMimeType": "application/json"}}
     hdr = {"x-goog-api-key": d["gemini"]}; ultimo = RuntimeError("Gemini no respondió"); t0 = time.time()
     def texto(r): return "".join(p.get("text", "") for p in r["candidates"][0]["content"]["parts"])
-    for modelo in ([d["modelo_gemini"]] if d.get("modelo_gemini") else MODELOS_GEMINI):
+    for modelo in _modelos_gemini(d):
         for intento in range(2):
             if time.time() - t0 > 50: raise ultimo                                  # nunca bloquear la edicion mas de ~1 min
             try:
-                return texto(_http(f"https://generativelanguage.googleapis.com/v1beta/models/{modelo}:generateContent", cuerpo, hdr))
+                out = texto(_http(f"https://generativelanguage.googleapis.com/v1beta/models/{modelo}:generateContent", cuerpo, hdr))
+                USADO["gemini"] = modelo; return out
             except RuntimeError as e:
                 ultimo = e; m = str(e)
                 if "Tiempo de espera" in m: break                                    # lento: probar otro modelo
                 if re.search(r"HTTP (503|500|429)", m) and intento == 0: time.sleep(2); continue
                 if re.search(r"HTTP (503|500|429|404)", m): break
+                if re.search(r"HTTP 400", m) and re.search(r"model|not supported|thinking|mime", m, re.I): break   # este modelo no sirve: el siguiente
                 if re.search(r"HTTP (400|401|403)", m) and not d["gemini"].startswith("AIza"):
                     try: return texto(_http("https://aiplatform.googleapis.com/v1/publishers/google/models/gemini-2.5-flash:generateContent", cuerpo, hdr))
                     except RuntimeError as e2: raise RuntimeError(f"{m[:80]} | Vertex: {str(e2)[:80]}")
@@ -99,6 +133,7 @@ def _groq(prompt, d):
                        "messages": [{"role": "system", "content": "Respondes SOLO con JSON válido, sin texto extra."},
                                     {"role": "user", "content": prompt}]},
                       {"Authorization": "Bearer " + d["groq"]})
+            USADO["groq"] = modelo
             return r["choices"][0]["message"]["content"]
         except RuntimeError as e:
             ultimo = e
@@ -112,6 +147,7 @@ def _claude(prompt, d):
                "system": "Respondes SOLO con JSON válido, sin texto extra.",
                "messages": [{"role": "user", "content": prompt}]},
               {"x-api-key": d["claude"], "anthropic-version": "2023-06-01"})
+    USADO["claude"] = d.get("modelo_claude") or "claude-haiku-5-5"
     return "".join(b.get("text", "") for b in r["content"] if b.get("type") == "text")
 
 def _json(txt):
@@ -137,6 +173,13 @@ def _explicar(p, e):
         return f"{n}: la clave no es válida.{extra}"
     return f"{n}: {m[:140]}"
 
+def _en_pausa(p, d):
+    c = (d.get("caida") or {}).get(p)
+    return bool(c) and time.time() < c
+
+def _pausar(p):
+    d = cargar(); d.setdefault("caida", {})[p] = time.time() + 3600; guardar(d)
+
 def _muerta(e):
     m = str(e)
     return not re.search(r"HTTP (503|500|429)", m) and bool(re.search(r"credit balance|billing|Incorrect API key|API_KEY_INVALID|invalid x-api-key|authentication|HTTP 401", m, re.I))
@@ -156,24 +199,26 @@ def _orden(modo, d):
 def pedir(prompt, modo="alternar"):
     """-> (dict, proveedor) o (None, None). Nunca lanza excepciones."""
     d = cargar()
-    for p in [x for x in _orden(modo, d) if x not in _CAIDAS]:
+    for p in [x for x in _orden(modo, d) if x not in _CAIDAS and not _en_pausa(x, d)]:
         try:
             data = _json(globals()["_" + p](prompt, d))
             if isinstance(data, dict):
                 d = cargar(); d["ultimo"] = p; guardar(d)
                 return data, p
         except Exception as e:
-            if _muerta(e): _CAIDAS.add(p)
+            if _muerta(e): _CAIDAS.add(p); _pausar(p)
             print(f"  IA {_explicar(p, e)} Sigo con otra IA o sin IA.")
     return None, None
 
 def probar(p):
     d = cargar()
     if not d.get(p): return False, f"Falta la clave de {NOMBRE[p]}."
-    _HASTA[0] = time.time() + 55
+    _HASTA[0] = time.time() + 55; _CAIDAS.discard(p)
     try:
         r = _json(globals()["_" + p]('Responde exactamente este JSON: {"ok": true}', d))
-        return bool(r.get("ok")), f"{NOMBRE[p]} funciona." if r.get("ok") else f"{NOMBRE[p]} respondió algo inesperado."
+        dd = cargar(); (dd.get("caida") or {}).pop(p, None); guardar(dd)
+        mod = f" (modelo {USADO[p]})" if USADO.get(p) else ""
+        return bool(r.get("ok")), f"{NOMBRE[p]} funciona{mod}." if r.get("ok") else f"{NOMBRE[p]} respondió algo inesperado."
     except Exception as e:
         return False, _explicar(p, e)
     finally: _HASTA[0] = None
@@ -225,7 +270,7 @@ Responde SOLO este JSON: {{"titulo": "...", "descripcion": "..."}}''', modo)
 
 def corregir_subs(modo, titulo, lineas):
     """Corrige ortografia y palabras mal transcritas SIN cambiar cuantas lineas hay ni su significado."""
-    data, p = pedir(f'''Eres corrector de subtítulos de video titulado "{titulo}". Corrige ortografía, tildes, puntuación y palabras mal transcritas.
+    data, p = pedir(f'''Eres corrector de subtítulos de video titulado "{titulo}". Corrige ortografía, tildes, puntuación y palabras mal transcritas (si está en español, respeta el español latinoamericano y su jerga, sin españolizar ni "corregir" voseo, lunfardo ni regionalismos; si hay frases en inglés, déjalas en inglés).
 No cambies el significado, no agregues ni quites líneas, no traduzcas. Mantén cada línea corta.
 Líneas (JSON): {json.dumps(lineas, ensure_ascii=False)}
 Responde SOLO este JSON: {{"lineas": [... exactamente {len(lineas)} textos ...]}}''', modo)

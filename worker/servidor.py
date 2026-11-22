@@ -76,7 +76,7 @@ def queue_items():
     global _LAST_ITEMS
     try:
         d = json.loads((ROOT / "queue.json").read_text("utf-8"))
-        _LAST_ITEMS = [dict({k: i.get(k) for k in ("id", "key", "type", "kind", "title", "status", "publishAt", "error", "url", "pct", "stage", "est", "ia")},
+        _LAST_ITEMS = [dict({k: i.get(k) for k in ("id", "key", "type", "kind", "title", "status", "publishAt", "error", "url", "pct", "stage", "est", "ia", "ia_title", "yt_url")},
                             hasfile=bool(i.get("id") and (MEDIA / f"{i['id']}_final.mp4").exists())) for i in d.get("items", [])]
     except Exception:
         pass
@@ -196,7 +196,8 @@ class H(BaseHTTPRequestHandler):
             want_up = bool(data.get("upload"))
             no_up = (not want_up) or (not launch_chrome())
             if want_up and no_up: log("Sin Chrome/Edge: solo preparo los videos.")
-            threading.Thread(target=run_job, args=(["--sin-subir"] if no_up else [],), daemon=True).start()
+            extra = ["--sin-subir"] if no_up else (["--modo", "now" if data.get("mode") != "schedule" else "schedule"])
+            threading.Thread(target=run_job, args=(extra,), daemon=True).start()
             return self._send({"ok": True, "message": "Editando y subiendo..." if not no_up else "Editando (sin subir)..."})
         if self.path == "/ia":                       # guarda las claves SOLO en esta PC (claves-ia.json)
             try: ia.set_claves(data)

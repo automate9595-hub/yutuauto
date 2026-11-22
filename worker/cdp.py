@@ -137,7 +137,26 @@ class Tab:
     def _centro(self, sel, idx=0):
         return self.eval(f"(function(){{var e=window.__A({json.dumps(sel)})[{idx}];if(!e)return null;"
                          "e.scrollIntoView({block:'center'});var r=e.getBoundingClientRect();"
-                         "return {x:r.left+r.width/2,y:r.top+r.height/2,w:r.width,h:r.height}}})()")
+                         "return {x:r.left+r.width/2,y:r.top+r.height/2,w:r.width,h:r.height}})()")
+
+    def visible(self, sel):
+        """True si hay al menos un elemento con ese selector que se ve en pantalla (no oculto)."""
+        return bool(self.eval(f"window.__A({json.dumps(sel)}).some(function(e){{var r=e.getBoundingClientRect();return r.width>0&&r.height>0}})"))
+
+    def habilitado(self, sel):
+        """True si el elemento existe, se ve y no esta deshabilitado."""
+        return bool(self.eval(f"window.__A({json.dumps(sel)}).some(function(e){{var r=e.getBoundingClientRect();"
+                              "return r.width>0&&r.height>0&&!e.hasAttribute('disabled')&&e.getAttribute('aria-disabled')!=='true'})"))
+
+    def esperar_visible(self, sel, timeout=30, chk=None):
+        end = time.time() + timeout
+        while time.time() < end:
+            if chk: chk()
+            try:
+                if self.visible(sel): return True
+            except Exception: pass
+            time.sleep(0.5)
+        return False
 
     def clic(self, sel, idx=0, esperar=0):
         if esperar: self.esperar(sel, esperar)
@@ -164,8 +183,13 @@ class Tab:
         """Reemplaza el contenido del campo (input o texto editable) y dispara los eventos reales de escritura."""
         self.clic(sel, idx)
         self.eval(f"(function(){{var e=window.__A({json.dumps(sel)})[{idx}];e.focus();"
-                  "if(e.select&&e.tagName!=='DIV'){e.select()}else{document.execCommand('selectAll',false,null)}}})()")
-        self.call("Input.insertText", {"text": texto})
+                  "if(e.select&&e.tagName!=='DIV'){e.select()}else{document.execCommand('selectAll',false,null)}})()")
+        for n, linea in enumerate(str(texto).split("\n")):             # insertText no crea saltos de linea: Enter real entre lineas
+            if n:
+                for t in ("keyDown", "keyUp"):
+                    self.call("Input.dispatchKeyEvent", {"type": t, "key": "Enter", "code": "Enter", "windowsVirtualKeyCode": 13,
+                                                         "nativeVirtualKeyCode": 13, **({"text": "\r"} if t == "keyDown" else {})})
+            if linea: self.call("Input.insertText", {"text": linea})
 
     def tecla(self, key="Enter", code=13):
         for t in ("keyDown", "keyUp"):

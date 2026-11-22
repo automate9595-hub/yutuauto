@@ -97,7 +97,8 @@ def srt_time(s):
 def subtitles(it, src, start, length, cfg, short):
     """Transcribe solo el tramo elegido y arma subtitulos cortos (estilo Shorts)."""
     words = voz.palabras(FFMPEG, src, start, length, cfg.get("lang", "es"), cfg.get("model", "small"),
-                         lambda f: set_prog(it, "sub", f), lambda: check_cancel(it))
+                         lambda f: set_prog(it, "sub", f), lambda: check_cancel(it),
+                         motor=cfg.get("stt", "auto"), titulo=it.get("title", ""))
     set_prog(it, "sub", 1.0, True)
     maxw = int(cfg.get("sub_words") or (4 if short else 8))
     caps, cur = [], []
@@ -127,7 +128,7 @@ def subtitles(it, src, start, length, cfg, short):
 def transcribe_full(it, src, cfg, dur):
     """Transcripcion de todo el video, solo para que la IA elija el mejor tramo."""
     words = voz.palabras(FFMPEG, src, 0, dur, cfg.get("lang", "es"), "base",
-                         lambda f: set_prog(it, "ia", f), lambda: check_cancel(it))
+                         lambda f: set_prog(it, "ia", f), lambda: check_cancel(it), motor="rapido", titulo=it.get("title", ""))
     return voz.frases(words)
 
 def srt_text(srt):
@@ -230,7 +231,7 @@ def process(it, cfg):
     print(f"  Tramo: {start:.0f}s -> {start + L:.0f}s ({L:.0f}s de {dur:.0f}s)")
     srt = None
     if cfg.get("sub", True):
-        print("  [2/3] Subtitulos (Whisper)...")
+        print("  [2/3] Subtitulos...")
         try: srt = subtitles(it, src, start, L, cfg, short)
         except Cancelled: raise
         except Exception as e: print("  Sin subtitulos:", str(e)[:200])
@@ -361,14 +362,36 @@ def abrir_dialogo(tab, cid, chk):
     except Exception: pass
     raise RuntimeError("Studio no abrió el cuadro de subida (probé enlace directo, botón de subir y menú Crear)")
 
-def studio_upload_one(tab, cid, it):
-    title = (it.get("ia_title") or it["title"]) + (" #Shorts" if it["kind"] == "short" else "")
-    desc = it.get("ia_desc") or it["title"]
+def _clic_primero(tab, selectores, idx=0, espera=0):
+    """Prueba varios selectores y hace clic en el primero que exista."""
+    for sel in selectores:
+        try:
+            if espera and not tab.esperar(sel, espera): continue
+            if tab.existe(sel): tab.clic(sel, idx); return True
+        except Exception: pass
+    return False
+
+def textos_para_subir(it, cfg):
+    """Titulo/descripcion de IA. Si ya se generaron al editar se usan; si no, se intenta ahora.
+    Devuelve (titulo o None, descripcion o ''). None = dejar el titulo que pone Studio (nombre del archivo)."""
+    t, desc = (it.get("ia_title") or "").strip(), (it.get("ia_desc") or "").strip()
+    if not t and cfg and ia_activa(cfg) and cfg.get("ia_text", True):
+        try:
+            paso("pidiendo título y descripción a la IA")
+            srt = MEDIA / f"{it.get('id', '')}.srt"
+            r = ia.textos(cfg.get("ia_mode", "alternar"), it.get("title", ""), srt_text(srt if srt.exists() else None), it.get("kind", "video"))
+            if r: t, desc = r["titulo"].strip(), r["descripcion"].strip(); it["ia_title"], it["ia_desc"] = t, desc; print(f"  [IA {r['prov']}] Título: {t}")
+        except Exception as e: print("  [IA] No pude generar el título:", str(e)[:120])
+    return (t[:100] if t else None), desc
+
+def studio_upload_one(tab, cid, it, cfg=None):
+    titulo, desc = textos_para_subir(it, cfg)
+    cuerpo = (desc + "\n\n" if desc else "") + (f"#Shorts\n" if it["kind"] == "short" and "#shorts" not in desc.lower() else "") + f"Fuente: {it['url']}"
     now_mode = not it.get("publishAt")
     when = None if now_mode else local(it["publishAt"])
     size_mb = os.path.getsize(it["file"]) / 1048576
     chk = lambda: check_cancel(it)
-    it["status"] = "uploading"; it.pop("error", None); set_prog(it, "up", 0.0, True)
+    it["status"] = "uploading"; it.pop("error", None); it.pop("yt_url", None); set_prog(it, "up", 0.0, True)
     abrir_dialogo(tab, cid, chk)
     paso("enviando el archivo de video")
     tab.archivos("input[type=file]", [it["file"]]); t0 = time.time()
@@ -378,18 +401,35 @@ def studio_upload_one(tab, cid, it):
         chk()
         if time.time() > end: raise RuntimeError("Studio no mostró el formulario de título y descripción")
         time.sleep(1)
-    up_progress(tab, it, t0, size_mb)
-    paso("escribiendo título y descripción")
-    tab.escribir("#textbox", title[:100], 0); time.sleep(0.4)
-    tab.escribir("#textbox", f"{desc}\n\nFuente: {it['url']}", 1); time.sleep(0.4)
+    time.sleep(1.5); up_progress(tab, it, t0, size_mb)
+    if titulo:
+        paso("escribiendo el título (IA)")
+        tab.escribir("#textbox", titulo, 0); time.sleep(0.5)
+    else:
+        paso("sin título de IA: dejo el nombre del archivo")
+    paso("escribiendo la descripción")
+    tab.escribir("#textbox", cuerpo, 1); time.sleep(0.5)
     paso("marcando 'no es para niños'")
-    tab.clic("[name='VIDEO_MADE_FOR_KIDS_NOT_MADE_FOR_KIDS']", 0, 20)
-    for n in (1, 2, 3):
-        chk(); up_progress(tab, it, t0, size_mb); paso(f"avanzando ({n}/3)")
-        tab.clic("#next-button", 0, 20); time.sleep(1.8)
+    if not _clic_primero(tab, ["[name='VIDEO_MADE_FOR_KIDS_NOT_MADE_FOR_KIDS']"], 0, 20):
+        if not tab.clic_texto(r"^(no,? no es para ni|no,? it'?s not made for kids)", "tp-yt-paper-radio-button, *[role=radio]"):
+            raise RuntimeError("No encontré la opción 'No es contenido para niños'")
+    time.sleep(0.6)
+    # Siguiente hasta llegar a Visibilidad (Detalles -> Elementos del video -> Comprobaciones -> Visibilidad)
+    for n in range(1, 8):
+        chk(); up_progress(tab, it, t0, size_mb)
+        if tab.visible("tp-yt-paper-radio-button[name='PUBLIC']"): break
+        paso(f"tocando 'Siguiente' ({n})")
+        fin = time.time() + 90
+        while not tab.habilitado("#next-button"):
+            chk()
+            if time.time() > fin: raise RuntimeError("El botón 'Siguiente' no se habilitó")
+            time.sleep(1)
+        tab.clic("#next-button"); time.sleep(2)
+    else:
+        raise RuntimeError("Llegué al final de las etapas sin ver la pantalla de Visibilidad")
     if now_mode:
-        paso("eligiendo publicar ahora (Público)")
-        tab.clic("tp-yt-paper-radio-button[name='PUBLIC']", 0, 20)
+        paso("eligiendo Público (publicar ahora)")
+        tab.clic("tp-yt-paper-radio-button[name='PUBLIC']", 0, 20); time.sleep(0.8)
     else:
         paso("programando la fecha")
         tab.clic("#second-container-expand-button", 0, 20); time.sleep(1)
@@ -399,15 +439,23 @@ def studio_upload_one(tab, cid, it):
     end = time.time() + 1500
     while True:
         chk(); up_progress(tab, it, t0, size_mb)
-        listo = tab.eval("(function(){var b=window.__D('#done-button');return !!b&&!b.hasAttribute('disabled')&&b.getAttribute('aria-disabled')!=='true'})()")
-        if listo: break
+        if tab.habilitado("#done-button"): break
         if time.time() > end: raise RuntimeError("La subida tardó más de 25 minutos")
         time.sleep(1.5)
-    paso("publicando")
-    tab.clic("#done-button"); time.sleep(5)
-    if tab.existe("#close-button"):
-        try: tab.clic("#close-button")
-        except Exception: pass
+    paso("publicando" if now_mode else "programando")
+    tab.clic("#done-button")
+    fin = time.time() + 120
+    while tab.visible("#done-button"):                        # cuando Studio cierra el formulario, ya se publicó
+        chk()
+        if time.time() > fin: raise RuntimeError("Studio no confirmó la publicación (el botón final sigue ahí)")
+        time.sleep(1)
+    time.sleep(2)
+    try:
+        link = tab.eval("(function(){var a=window.__A(\"a[href*='youtu.be/'],a[href*='youtube.com/shorts/'],a[href*='youtube.com/watch']\");"
+                        "for(var i=0;i<a.length;i++){var r=a[i].getBoundingClientRect();if(r.width>0)return a[i].href}return ''})()")
+        if link: it["yt_url"] = link
+    except Exception: pass
+    _clic_primero(tab, ["#close-button", "ytcp-button#close-button"])
     it["status"] = "published" if now_mode else "scheduled"; it["pct"] = 100
     it["stage"] = "Publicado" if now_mode else "Programado"; it.pop("est", None)
 
@@ -442,7 +490,7 @@ def studio_upload(d, only=None, mode=None):
     for it in pending:
         try:
             check_cancel(it)
-            studio_upload_one(tab, cid, it); print("Subido:", it["title"], it.get("publishAt") or "publicado ahora")
+            studio_upload_one(tab, cid, it, d.get("config")); print("Subido:", it["title"], it.get("publishAt") or "publicado ahora")
         except Cancelled:
             it["status"] = "cancelled"; it["stage"] = "Cancelado"; it.pop("publishAt", None)
             print("Cancelado:", it.get("title")); save(d)
@@ -453,6 +501,8 @@ def studio_upload(d, only=None, mode=None):
             it["status"] = "ready"; it["pct"] = 100; it["stage"] = "Listo"
             it["error"] = f"No se pudo subir (paso: {STEP[0]}): {str(e)[:150]}. Detalle en worker\\diagnostico-subida.txt"
             print("No se pudo subir automaticamente:", it["title"], "->", STEP[0], "->", e)
+            try: tab.ir(f"https://studio.youtube.com/channel/{cid}")        # sale del formulario a medias
+            except Exception: pass
         save(d)
     try: tab.cerrar()
     except Exception: pass
@@ -476,7 +526,7 @@ def main():
     if NO_UPLOAD:
         write_plan([i for i in d["items"] if i["status"] == "ready"])
     else:
-        try: studio_upload(d)
+        try: studio_upload(d, mode=(sys.argv[sys.argv.index("--modo") + 1] if "--modo" in sys.argv else None))
         except Exception as e: print("Fallo la subida automatica:", e); marcar_fallo(d, d["items"], "Falló la subida: " + str(e))
     print("Listo. Videos terminados en la carpeta media. Plan: plan-publicacion.txt")
 

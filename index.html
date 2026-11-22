@@ -1,103 +1,145 @@
 <!doctype html>
 <html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#070b14">
 <title>Yutu Studio — Automatización de video</title><link rel="stylesheet" href="styles.css"></head>
-<body><div id="splash"><div class="sp-mark">Y</div><div class="sp-bar"><i></i></div></div>
+<body>
 <header class="nav"><a class="brand" href="#top"><span class="mark">Y</span>Yutu <b>Studio</b></a>
-<nav><a href="#importar">Importar</a><a href="#cola">Cola</a><a href="#edicion">Edición</a><a href="#control">Ejecutar</a><a href="#publicados">Publicaciones</a><a href="#auto">Automatización</a><a href="#flujo">Flujo</a></nav></header>
+<div class="pill-row"><span class="pill" id="p-worker"><i></i>Worker en tu PC</span><span class="pill" id="p-yt"><i></i>Canal de YouTube</span></div></header>
+
 <main id="top">
-<section class="hero"><div><span class="chip">● Panel de producción</span><h1>Pegá links. <em>Publicá solo.</em></h1>
-<p>Armá tu cola, definí cuántos Shorts y videos salen por día y dejá que el worker descargue, recorte, subtitule y programe todo en tu canal.</p>
-<div class="row"><a class="btn pri" href="#importar">Empezar ahora →</a><a class="btn ghost" href="#flujo">Ver el flujo</a></div></div>
-<div class="stats"><div class="card stat"><small>EN COLA</small><strong id="s-total">0</strong></div><div class="card stat"><small>SHORTS</small><strong id="s-short">0</strong></div><div class="card stat"><small>VIDEOS</small><strong id="s-video">0</strong></div><div class="card stat acc"><small>DÍAS CUBIERTOS</small><strong id="s-days">0</strong></div></div></section>
+<section class="hero"><div><h1>Pegá links. <em>Se publica solo.</em></h1>
+<p>Seguí los pasos de abajo y elegí lo que quieras en cada uno. Al final, un solo botón descarga, recorta, subtitula, edita y publica en tu canal.</p></div>
+<div class="stats"><div class="stat"><small>EN COLA</small><strong id="s-total">0</strong></div><div class="stat"><small>SHORTS</small><strong id="s-short">0</strong></div><div class="stat"><small>VIDEOS</small><strong id="s-video">0</strong></div><div class="stat acc"><small>PUBLICADOS</small><strong id="s-pub">0</strong></div></div></section>
 
-<section id="importar"><div class="head"><span class="chip">PASO 1</span><h2>Importar desde YouTube</h2><p>Un link por línea: videos, Shorts o playlists completas.</p></div>
-<div class="card pad"><textarea id="links" spellcheck="false" placeholder="https://www.youtube.com/watch?v=xxxxxxxxxxx&#10;https://youtube.com/shorts/yyyyyyyyyyy&#10;https://www.youtube.com/playlist?list=PLxxxx"></textarea>
-<div class="row"><button class="btn pri" id="add">Analizar y agregar →</button><button class="btn ghost" id="clr">Limpiar</button><span id="msg" class="msg"></span></div></div></section>
+<div class="wiz" id="wiz">
 
-<section id="cola"><div class="head"><span class="chip">PASO 2</span><h2>Cola de trabajo</h2><p>Elegí si cada link sale como Short (vertical, ≤58 s) o como video normal.</p></div>
-<div class="card"><div class="bar"><b id="qcount">0 elementos</b><div class="row"><button class="btn ghost sm" id="all-short">Todos Shorts</button><button class="btn ghost sm" id="all-video">Todos Videos</button><button class="btn ghost sm danger" id="empty">Vaciar</button></div></div><div id="list"></div></div></section>
+<!-- 1 -->
+<section class="stp" data-n="1"><button class="stp-h" type="button" aria-expanded="false"><i class="num">1</i><span class="tt"><b>Conectar</b><small id="sum-1">Worker y canal de YouTube</small></span><span class="chev">▾</span></button>
+<div class="stp-b"><p class="sub">Ejecutá <code>worker\2-INSTALAR-Y-EJECUTAR.bat</code> una vez: queda en segundo plano con un icono "Y" junto al wifi. Después conectá tu canal (solo la primera vez).</p>
+<div class="row"><button class="btn pri" id="connect">Conectar con mi canal de YouTube ▷</button><button class="btn ghost sm" id="force">Ya inicié sesión en Studio: marcar como conectado</button><button class="btn ghost sm" id="open-guide">Ver guía</button></div>
+<div id="yt-detail" class="sub"></div>
+<div class="nav-step"><span></span><button class="btn pri" data-go="2" type="button">Siguiente: videos →</button></div></div></section>
 
-<section id="edicion"><div class="head"><span class="chip">PASO 3</span><h2>Edición del video</h2><p>Configurá qué le hace el worker a cada video antes de ejecutar.</p></div>
-<div class="egrid">
-<div class="card pad cfg"><h3>Subtítulos</h3>
-<label class="chk"><input id="c-sub" type="checkbox"> Quemar subtítulos en el video</label>
-<label>Idioma<select id="c-lang"><option value="es">Español</option><option value="en">Inglés</option><option value="auto">Detectar</option></select></label>
-<label>Precisión (modelo)<select id="c-model"><option value="tiny">Rápido (tiny)</option><option value="base">Equilibrado (base)</option><option value="small">Preciso (small)</option></select></label>
+<!-- 2 -->
+<section class="stp" data-n="2"><button class="stp-h" type="button" aria-expanded="false"><i class="num">2</i><span class="tt"><b>Videos</b><small id="sum-2">Pegá los links</small></span><span class="chev">▾</span></button>
+<div class="stp-b"><p class="sub">Un link por línea: videos, Shorts o playlists completas.</p>
+<textarea id="links" spellcheck="false" placeholder="https://www.youtube.com/watch?v=xxxxxxxxxxx&#10;https://youtube.com/shorts/yyyyyyyyyyy&#10;https://www.youtube.com/playlist?list=PLxxxx"></textarea>
+<div class="row"><button class="btn pri" id="add">Analizar y agregar →</button><button class="btn ghost" id="clr">Limpiar</button><span id="msg" class="msg"></span></div>
+<div class="listbox"><div class="bar"><b id="qcount">0 elementos</b><div class="row"><button class="btn ghost sm" id="all-short">Todos Shorts</button><button class="btn ghost sm" id="all-video">Todos Videos</button><button class="btn ghost sm danger" id="empty">Vaciar</button></div></div><div id="list"></div></div>
+<div class="nav-step"><button class="btn ghost" data-go="1" type="button">← Atrás</button><button class="btn pri" data-go="3" type="button">Siguiente: subtítulos →</button></div></div></section>
+
+<!-- 3 -->
+<section class="stp" data-n="3"><button class="stp-h" type="button" aria-expanded="false"><i class="num">3</i><span class="tt"><b>Subtítulos</b><small id="sum-3"></small></span><span class="chev">▾</span></button>
+<div class="stp-b">
+<label class="chk big-chk"><input id="c-sub" type="checkbox"> Quemar subtítulos en el video</label>
+<div class="grp open"><button class="grp-h" type="button">Reconocimiento de voz <small id="g-voz"></small></button><div class="grp-b cfg">
+<label>Idioma<select id="c-lang"><option value="es-latino">Español latino (recomendado)</option><option value="es">Español (general)</option><option value="en">Inglés</option><option value="auto">Detectar solo (si mezcla idiomas)</option></select></label>
+<label>Motor<select id="c-stt"><option value="auto">Automático: el mejor disponible (Groq large-v3 → turbo → tu PC)</option><option value="groq_v3">Groq · Whisper large-v3 (el más preciso, en la nube)</option><option value="groq_turbo">Groq · Whisper large-v3-turbo (muy bueno y más rápido)</option><option value="local">En tu PC · faster-whisper (sin internet)</option><option value="vosk">En tu PC · Vosk (ligero, el más flojo)</option></select></label>
+<label>Modelo para el motor de tu PC<select id="c-model"><option value="tiny">tiny — rapidísimo, impreciso</option><option value="base">base — rápido</option><option value="small">small — equilibrado</option><option value="medium">medium — preciso, necesita ~5 GB de RAM</option><option value="large-v3-turbo">large-v3-turbo — muy preciso, ~3 GB</option><option value="large-v3">large-v3 — el mejor, ~5 GB y lento</option></select></label>
+<p class="sub">Con la clave de Groq cargada, el modo Automático transcribe en la nube con Whisper large-v3 (mucho mejor que "small") y usa el título del video como pista para escribir bien los nombres. Si Groq falla, sigue solo con tu PC. Además, la IA puede corregir ortografía en el paso 6.</p></div></div>
+<div class="grp"><button class="grp-h" type="button">Aspecto <small id="g-asp"></small></button><div class="grp-b cfg">
 <label>Posición<select id="c-sub_pos"><option value="bottom">Abajo</option><option value="middle">Centro</option><option value="top">Arriba</option></select></label>
 <label>Tamaño<select id="c-sub_size"><option value="s">Pequeño</option><option value="m">Mediano</option><option value="l">Grande</option></select></label>
 <label>Color<select id="c-sub_color"><option value="white">Blanco</option><option value="yellow">Amarillo</option><option value="green">Verde</option></select></label>
 <label>Palabras por línea<input id="c-sub_words" type="number" min="1" max="12" placeholder="Auto"></label>
-<label class="chk"><input id="c-sub_caps" type="checkbox"> TODO EN MAYÚSCULAS</label></div>
-<div class="card pad cfg"><h3>Recorte</h3>
-<label>Shorts: qué tramo usar<select id="c-cut_mode"><option value="auto">Automático (desde el 10 %)</option><option value="inicio">Desde el inicio</option><option value="manual">Segundo exacto</option></select></label>
-<label>Shorts: segundo de inicio<input id="c-cut_start" type="number" min="0"></label>
-<label>Shorts: duración (máx. 60 s)<input id="c-short_len" type="number" min="5" max="60"></label>
-<label>Shorts: encuadre vertical<select id="c-frame"><option value="crop">Recorte al centro</option><option value="blur">Completo con fondo difuminado</option></select></label>
+<label class="chk"><input id="c-sub_caps" type="checkbox"> TODO EN MAYÚSCULAS</label></div></div>
+<div class="nav-step"><button class="btn ghost" data-go="2" type="button">← Atrás</button><button class="btn pri" data-go="4" type="button">Siguiente: recorte →</button></div></div></section>
+
+<!-- 4 -->
+<section class="stp" data-n="4"><button class="stp-h" type="button" aria-expanded="false"><i class="num">4</i><span class="tt"><b>Recorte</b><small id="sum-4"></small></span><span class="chev">▾</span></button>
+<div class="stp-b">
+<div class="grp open"><button class="grp-h" type="button">Shorts (vertical 9:16)</button><div class="grp-b cfg">
+<label>Qué tramo usar<select id="c-cut_mode"><option value="auto">Automático (la IA elige el mejor; si no, desde el 10 %)</option><option value="inicio">Desde el inicio</option><option value="manual">Segundo exacto</option></select></label>
+<label>Segundo de inicio (solo "Segundo exacto")<input id="c-cut_start" type="number" min="0"></label>
+<label>Duración (máx. 60 s)<input id="c-short_len" type="number" min="5" max="60"></label>
+<label>Encuadre vertical<select id="c-frame"><option value="crop">Recorte al centro</option><option value="blur">Completo con fondo difuminado</option></select></label></div></div>
+<div class="grp"><button class="grp-h" type="button">Videos normales</button><div class="grp-b cfg">
 <label class="chk"><input id="c-vid_trim" type="checkbox"> Recortar también los videos largos</label>
-<label>Videos: inicio (segundos)<input id="c-vid_start" type="number" min="0"></label>
-<label>Videos: duración máxima (minutos, 0 = hasta el final)<input id="c-vid_len" type="number" min="0"></label></div>
-<div class="card pad cfg"><h3>Acabado</h3>
+<label>Inicio (segundos)<input id="c-vid_start" type="number" min="0"></label>
+<label>Duración máxima (minutos, 0 = hasta el final)<input id="c-vid_len" type="number" min="0"></label></div></div>
+<div class="nav-step"><button class="btn ghost" data-go="3" type="button">← Atrás</button><button class="btn pri" data-go="5" type="button">Siguiente: efectos →</button></div></div></section>
+
+<!-- 5 -->
+<section class="stp" data-n="5"><button class="stp-h" type="button" aria-expanded="false"><i class="num">5</i><span class="tt"><b>Efectos y acabado</b><small id="sum-5"></small></span><span class="chev">▾</span></button>
+<div class="stp-b">
+<div class="grp open"><button class="grp-h" type="button">Acabado <small>(una sola pasada de FFmpeg)</small></button><div class="grp-b cfg">
 <label class="chk"><input id="c-vivid" type="checkbox"> Color vivo y nitidez</label>
 <label class="chk"><input id="c-vignette" type="checkbox"> Viñeta</label>
 <label class="chk"><input id="c-fade" type="checkbox"> Fundido de entrada y salida</label>
-<label class="chk"><input id="c-loudnorm" type="checkbox"> Normalizar volumen</label>
-<p class="sub">Todo se aplica en una sola pasada de FFmpeg. Los efectos recodifican el video, así que tardan más.</p></div>
-<div class="card pad fxbox"><h3>Efectos de cámara e imagen <span class="sub" id="fx-count"></span></h3>
-<p class="sub">Elegí los que quieras. Se reparten a lo largo del video y se suavizan entre sí. El orden en que los tocás es el orden en que se aplican.</p>
+<label class="chk"><input id="c-loudnorm" type="checkbox"> Normalizar volumen</label></div></div>
+<div class="grp"><button class="grp-h" type="button">Efectos de cámara e imagen <small id="fx-count"></small></button><div class="grp-b">
+<p class="sub">Elegí los que quieras. El orden en que los tocás es el orden en que se aplican. Con la IA activa, ella arma la mezcla a partir de tu selección.</p>
 <div class="row"><button class="btn ghost sm" data-fxp="dyn">Dinámico</button><button class="btn ghost sm" data-fxp="cine">Cinemático</button><button class="btn ghost sm" data-fxp="retro">Retro</button><button class="btn ghost sm" data-fxp="all">Todos</button><button class="btn ghost sm danger" data-fxp="none">Ninguno</button></div>
 <div id="fxchips" class="chips"></div>
 <div class="fxcfg">
 <label>Cómo se combinan<select id="c-fx_mode"><option value="seq">Uno tras otro</option><option value="overlap">Entrelazados (se solapan)</option><option value="random">Orden aleatorio</option><option value="stack">Todos a la vez</option></select></label>
 <label>Duración de cada efecto (s)<input id="c-fx_dur" type="number" min="0.5" max="30" step="0.5"></label>
 <label>Pausa entre efectos (s)<input id="c-fx_gap" type="number" min="0" max="30" step="0.5"></label>
-<label>Suavizado de entrada/salida (s)<input id="c-fx_blend" type="number" min="0.1" max="5" step="0.1"></label>
+<label>Suavizado (s)<input id="c-fx_blend" type="number" min="0.1" max="5" step="0.1"></label>
 <label>Intensidad (0.2 a 1.5)<input id="c-fx_power" type="number" min="0.2" max="1.5" step="0.1"></label>
 <label>Empezar en el segundo<input id="c-fx_start" type="number" min="0" step="1"></label>
-<label class="chk"><input id="c-fx_repeat" type="checkbox"> Repetir hasta el final del video</label></div></div>
-<div class="card pad aibox"><h3>Ayuda de IA (opcional) <span class="sub" id="ia-est"></span></h3>
-<p class="sub">Gemini, Groq y Claude se turnan: si uno se queda sin cuota o falla, sigue el siguiente, y si fallan todos la edición continúa igual con tu configuración. La IA trabaja sobre la edición: elige el mejor tramo, los efectos, corrige los subtítulos y escribe título y descripción. Las claves vienen precargadas en worker\claves-ia.json (solo en tu PC; GitHub no permite subirlas). Podés cambiarlas o borrarlas desde acá.</p>
-<div class="aikeys">
-<div class="aik"><b>Gemini</b><input id="k-gemini" type="password" placeholder="Pegá la clave de Gemini" autocomplete="off"><div class="row"><button class="btn pri sm" data-ia="gemini" data-a="save">Guardar</button><button class="btn ghost sm" data-ia="gemini" data-a="test">Probar</button><button class="btn ghost sm danger" data-ia="gemini" data-a="del">Borrar</button></div><small id="ia-gemini" class="sub"></small></div>
-<div class="aik"><b>Groq (GroqCloud)</b><input id="k-groq" type="password" placeholder="Pegá la clave de Groq (gsk_…)" autocomplete="off"><div class="row"><button class="btn pri sm" data-ia="groq" data-a="save">Guardar</button><button class="btn ghost sm" data-ia="groq" data-a="test">Probar</button><button class="btn ghost sm danger" data-ia="groq" data-a="del">Borrar</button></div><small id="ia-groq" class="sub"></small></div>
-<div class="aik"><b>Claude (Anthropic)</b><input id="k-claude" type="password" placeholder="Pegá la clave de Claude" autocomplete="off"><div class="row"><button class="btn pri sm" data-ia="claude" data-a="save">Guardar</button><button class="btn ghost sm" data-ia="claude" data-a="test">Probar</button><button class="btn ghost sm danger" data-ia="claude" data-a="del">Borrar</button></div><small id="ia-claude" class="sub"></small></div></div>
-<div class="fxcfg">
-<label>Cómo se turnan<select id="c-ia_mode"><option value="alternar">Alternar las 3 (una por tarea)</option><option value="gemini_primero">Gemini primero, las otras de respaldo</option><option value="groq_primero">Groq primero, las otras de respaldo</option><option value="claude_primero">Claude primero, las otras de respaldo</option><option value="solo_gemini">Solo Gemini</option><option value="solo_groq">Solo Groq</option><option value="solo_claude">Solo Claude</option><option value="apagado">IA apagada</option></select></label>
+<label class="chk"><input id="c-fx_repeat" type="checkbox"> Repetir hasta el final</label></div></div></div>
+<div class="nav-step"><button class="btn ghost" data-go="4" type="button">← Atrás</button><button class="btn pri" data-go="6" type="button">Siguiente: IA →</button></div></div></section>
+
+<!-- 6 -->
+<section class="stp" data-n="6"><button class="stp-h" type="button" aria-expanded="false"><i class="num">6</i><span class="tt"><b>Inteligencia artificial</b><small id="sum-6"></small></span><span class="chev">▾</span></button>
+<div class="stp-b">
+<p class="sub">Gemini, Groq y Claude se turnan: si uno falla o no tiene cuota, sigue el siguiente, y si fallan todos la edición continúa igual. Las claves se guardan solo en tu PC (<code>worker\claves-ia.json</code>). <span id="ia-est"></span></p>
+<div class="grp open"><button class="grp-h" type="button">Qué hace la IA</button><div class="grp-b cfg">
+<label>Cómo se turnan<select id="c-ia_mode"><option value="alternar">Alternar las 3 (una por tarea)</option><option value="groq_primero">Groq primero, las otras de respaldo</option><option value="gemini_primero">Gemini primero, las otras de respaldo</option><option value="claude_primero">Claude primero, las otras de respaldo</option><option value="solo_gemini">Solo Gemini</option><option value="solo_groq">Solo Groq</option><option value="solo_claude">Solo Claude</option><option value="apagado">IA apagada</option></select></label>
+<label class="chk"><input id="c-ia_text" type="checkbox"> Escribir título y descripción (si la IA no responde, se sube con el nombre del archivo)</label>
 <label class="chk"><input id="c-ia_cut" type="checkbox"> Elegir el mejor tramo (Shorts en modo automático)</label>
-<label class="chk"><input id="c-ia_fx" type="checkbox"> Elegir efectos (de los que marqué; si no marqué, de todos)</label>
 <label class="chk"><input id="c-ia_sub" type="checkbox"> Corregir los subtítulos</label>
-<label class="chk"><input id="c-ia_text" type="checkbox"> Escribir título y descripción</label></div>
-<small id="ia-msg" class="sub"></small></div>
-</div></section>
+<label class="chk"><input id="c-ia_fx" type="checkbox"> Elegir y combinar efectos</label></div></div>
+<div class="grp"><button class="grp-h" type="button">Gemini <small id="ia-gemini"></small></button><div class="grp-b cfg">
+<input id="k-gemini" type="password" placeholder="Pegá la clave de Gemini" autocomplete="off">
+<div class="row"><button class="btn pri sm" data-ia="gemini" data-a="save">Guardar clave</button><button class="btn ghost sm" data-ia="gemini" data-a="test">Probar</button><button class="btn ghost sm danger" data-ia="gemini" data-a="del">Borrar</button></div>
+<label>Modelo (vacío = automático: el Flash Lite más nuevo que acepte tu clave)<input id="k-modelo" list="modelos-gemini" placeholder="Automático · ej: gemini-flash-lite-latest" autocomplete="off"></label>
+<datalist id="modelos-gemini"><option value="gemini-flash-lite-latest"><option value="gemini-3.1-flash-lite"><option value="gemini-2.5-flash-lite"><option value="gemini-flash-latest"><option value="gemini-2.5-flash"></datalist>
+<div class="row"><button class="btn ghost sm" data-ia="gemini" data-a="model">Guardar modelo</button></div></div></div>
+<div class="grp"><button class="grp-h" type="button">Groq <small id="ia-groq"></small></button><div class="grp-b cfg">
+<input id="k-groq" type="password" placeholder="Pegá la clave de Groq (gsk_…)" autocomplete="off">
+<div class="row"><button class="btn pri sm" data-ia="groq" data-a="save">Guardar clave</button><button class="btn ghost sm" data-ia="groq" data-a="test">Probar</button><button class="btn ghost sm danger" data-ia="groq" data-a="del">Borrar</button></div>
+<p class="sub">La misma clave de Groq se usa para los subtítulos con Whisper large-v3.</p></div></div>
+<div class="grp"><button class="grp-h" type="button">Claude <small id="ia-claude"></small></button><div class="grp-b cfg">
+<input id="k-claude" type="password" placeholder="Pegá la clave de Claude" autocomplete="off">
+<div class="row"><button class="btn pri sm" data-ia="claude" data-a="save">Guardar clave</button><button class="btn ghost sm" data-ia="claude" data-a="test">Probar</button><button class="btn ghost sm danger" data-ia="claude" data-a="del">Borrar</button></div>
+<p class="sub">Si dice que falta crédito: la API de Claude se carga aparte en console.anthropic.com (la suscripción de Claude.ai no la incluye). Mientras tanto se salta sola.</p></div></div>
+<small id="ia-msg" class="msg"></small>
+<div class="nav-step"><button class="btn ghost" data-go="5" type="button">← Atrás</button><button class="btn pri" data-go="7" type="button">Siguiente: publicación →</button></div></div></section>
 
-<section id="control"><div class="head"><span class="chip">PASO 4</span><h2>Conectar y ejecutar</h2><p>Conectá tu canal y empezá la edición en el momento.</p></div>
-<div class="grid2"><div class="card pad ctl">
-<div class="pill-row"><span class="pill" id="p-worker"><i></i>Worker en tu PC</span><span class="pill" id="p-yt"><i></i>Canal de YouTube</span></div>
-<button class="btn ghost" id="connect">Conectar con mi canal de YouTube ▷</button>
-<button class="btn ghost sm" id="force">Ya inicié sesión en Studio: marcar como conectado</button><div id="yt-detail" class="sub"></div>
-<label class="chk"><input id="reedit" type="checkbox"> Volver a editar los que ya estaban listos (por si cambiaste la edición)</label>
-<button class="btn ghost big" id="start">Comenzar proceso (solo editar) ▶</button>
-<button class="btn pri big" id="start-up">Comenzar proceso, automatizar y subir ahora ⚡</button>
-<div id="ctl-msg" class="msg"></div>
-<p class="sub">Primero ejecutá <code>worker\2-INSTALAR-Y-EJECUTAR.bat</code>: queda en segundo plano con un icono junto al wifi y la bateria.</p></div>
-<div class="card pad"><h3>Progreso</h3><pre id="log" class="log">Esperando al worker...</pre></div></div></section>
-
-<section id="publicados"><div class="head"><span class="chip">VISTA PREVIA</span><h2>Publicaciones</h2><p>Estado y porcentaje de cada video: descargando, editando, listo, subiendo o programado.</p></div>
-<div class="row pubtools"><button class="btn pri sm js-upall">Subir ahora los listos ⚡</button><button class="btn ghost sm danger" id="cancel-all">Cancelar todo lo que está en proceso</button></div>
-<div id="pub" class="pub"><div class="empty">Todavía no hay videos procesados.</div></div></section>
-
-<section id="auto"><div class="head"><span class="chip">PASO 5</span><h2>Automatización</h2><p>Ritmo y modo de publicación.</p></div>
-<div class="grid2"><div class="card pad cfg">
+<!-- 7 -->
+<section class="stp" data-n="7"><button class="stp-h" type="button" aria-expanded="false"><i class="num">7</i><span class="tt"><b>Publicación</b><small id="sum-7"></small></span><span class="chev">▾</span></button>
+<div class="stp-b">
+<div class="cfg"><label>Al subir a YouTube<select id="c-publish"><option value="now">Publicar de inmediato (Público)</option><option value="schedule">Programar según los horarios</option></select></label></div>
+<div id="sch-box" class="grid2"><div class="cfg">
 <label>Shorts por día<input id="c-sn" type="number" min="0" max="6"></label>
 <label>Horarios Shorts<input id="c-st" placeholder="09:00,14:00,20:00"></label>
 <label>Videos por día<input id="c-vn" type="number" min="0" max="6"></label>
-<label>Horarios Videos<input id="c-vt" placeholder="12:00,18:00"></label>
-<label>Al subir a YouTube<select id="c-publish"><option value="schedule">Programar según los horarios</option><option value="now">Publicar de inmediato</option></select></label>
-<button class="btn pri js-upall">Subir ahora los videos ya editados ⚡</button>
-<button class="btn ghost" id="open-guide">Abrir guía de activación ◧</button><button class="btn pri" id="export">Exportar cola para el worker ↓</button></div>
-<div class="card pad"><h3>Calendario previsto</h3><div id="sched" class="sched"></div></div></div></section>
+<label>Horarios Videos<input id="c-vt" placeholder="12:00,18:00"></label></div>
+<div><h3>Calendario previsto</h3><div id="sched" class="sched"></div></div></div>
+<div class="nav-step"><button class="btn ghost" data-go="6" type="button">← Atrás</button><button class="btn pri" data-go="8" type="button">Siguiente: ejecutar →</button></div></div></section>
 
-<section id="flujo"><div class="head"><span class="chip">FLUJO</span><h2>Qué hace el worker</h2><p>Corre en segundo plano en tu PC con <code>2-INSTALAR-Y-EJECUTAR.bat</code>: GitHub Pages solo muestra este panel.</p></div>
-<div class="steps"><div class="card step"><i>1</i><b>Descarga</b><p>yt-dlp baja video o playlist.</p></div><div class="card step"><i>2</i><b>Recorte</b><p>Short: 58 s en 9:16. Video: completo.</p></div><div class="card step"><i>3</i><b>Subtítulos</b><p>Whisper transcribe y los quema.</p></div><div class="card step"><i>4</i><b>Publica</b><p>Sube y programa por la API de YouTube.</p></div></div>
-<div class="card pad note"><b>Usá contenido tuyo o con permiso.</b> Resubir videos ajenos viola los términos de YouTube y suele terminar en strikes o monetización denegada.</div></section>
-</main><div id="win" class="win-back" aria-hidden="true"><div class="win" role="dialog" aria-modal="true"><div class="win-bar"><span class="d r" data-close></span><span class="d y" data-close></span><span class="d g"></span><b id="win-title"></b></div><div id="win-body" class="win-body"></div></div></div>
-<footer>Yutu Studio · v12.0</footer><script src="app.js"></script></body></html>
+<!-- 8 -->
+<section class="stp" data-n="8"><button class="stp-h" type="button" aria-expanded="false"><i class="num">8</i><span class="tt"><b>Ejecutar</b><small id="sum-8">Todo automático</small></span><span class="chev">▾</span></button>
+<div class="stp-b ctl">
+<p class="sub">No tenés que tocar nada más: el worker descarga, edita, sube a tu canal, toca "Siguiente" en cada etapa de Studio y publica.</p>
+<button class="btn pri big" id="start-up">Procesar y publicar todo ⚡</button>
+<button class="btn ghost" id="start">Solo editar (sin subir) ▶</button>
+<label class="chk"><input id="reedit" type="checkbox"> Volver a editar los que ya estaban listos (por si cambiaste la edición)</label>
+<div id="ctl-msg" class="msg"></div>
+<h3>Progreso</h3><pre id="log" class="log">Esperando al worker...</pre>
+<div class="nav-step"><button class="btn ghost" data-go="7" type="button">← Atrás</button><button class="btn pri" data-go="9" type="button">Ver publicaciones →</button></div></div></section>
+
+<!-- 9 -->
+<section class="stp" data-n="9"><button class="stp-h" type="button" aria-expanded="false"><i class="num">9</i><span class="tt"><b>Publicaciones</b><small id="sum-9">Estado de cada video</small></span><span class="chev">▾</span></button>
+<div class="stp-b">
+<div class="row pubtools"><button class="btn pri sm js-upall">Subir ahora los editados ⚡</button><button class="btn ghost sm danger" id="cancel-all">Cancelar todo lo que está en proceso</button><button class="btn ghost sm" id="export">Exportar cola ↓</button></div>
+<div id="pub" class="pub"><div class="empty">Todavía no hay videos procesados.</div></div></div></section>
+</div>
+
+<div class="card pad note"><b>Usá contenido tuyo o con permiso.</b> Resubir videos ajenos puede violar los términos de YouTube y terminar en reclamos de derechos, strikes o monetización denegada.</div>
+</main>
+
+<div class="dock"><div id="dock-msg" class="dock-msg">Listo para procesar</div><button class="btn pri" id="dock-go" type="button">Procesar y publicar todo ⚡</button></div>
+<div id="win" class="win-back" aria-hidden="true"><div class="win" role="dialog" aria-modal="true"><div class="win-bar"><span class="d r" data-close></span><span class="d y" data-close></span><span class="d g"></span><b id="win-title"></b></div><div id="win-body" class="win-body"></div></div></div>
+<footer>Yutu Studio · v13.0</footer><script src="app.js"></script></body></html>
