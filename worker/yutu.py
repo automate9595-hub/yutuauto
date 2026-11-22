@@ -467,6 +467,41 @@ def avanzar_hasta_visibilidad(tab, it, t0, size_mb, chk, limite=240):
         time.sleep(1)
     raise RuntimeError("No pude pasar a la pantalla de Visibilidad: " + estado_botones(tab))
 
+PATRON_FORZAR = r"^(publicar de todas formas|publicar igualmente|publish anyway)$"
+TAGS_BOTON = "ytcp-button, button, tp-yt-paper-button, [role=button], a"
+
+def publicar_de_todas_formas(tab):
+    """Si Studio muestra 'Aún estamos comprobando tu contenido', toca 'Publicar de todas formas' (nunca 'Entendido')."""
+    try: return bool(tab.clic_texto(PATRON_FORZAR, TAGS_BOTON))
+    except Exception: return False
+
+def id_de_url(u):
+    m = re.search(r"(?:youtu\.be/|shorts/|[?&]v=)([\w-]{11})", u or ""); return m.group(1) if m else None
+
+def verificar_publicado(tab, cid, it, chk):
+    """Mira la lista de contenido de Studio y comprueba que el video figure como Público. Devuelve 'publico', 'privado' o None (no se pudo ver)."""
+    vid = id_de_url(it.get("yt_url"))
+    if not vid: return None
+    try:
+        tab.ir(f"https://studio.youtube.com/channel/{cid}/videos/{'short' if it.get('kind') == 'short' else 'upload'}")
+        js = ("(function(){var a=window.__A(\"a[href*='/video/" + vid + "/']\");if(!a.length)return null;var e=a[0],t='';"
+              "for(var i=0;i<10&&e;i++){e=e.parentElement;if(e&&e.tagName&&/ROW/i.test(e.tagName)){t=e.innerText;break}}"
+              "if(!t){e=a[0];for(var j=0;j<6&&e.parentElement;j++)e=e.parentElement;t=e.innerText}return t})()")
+        fin = time.time() + 75; txt = None
+        while time.time() < fin:
+            chk()
+            try: txt = tab.eval(js)
+            except Exception: txt = None
+            if txt: break
+            time.sleep(2)
+        if not txt: return None
+        t = txt.lower()
+        if re.search(r"\bp[uú]blico\b|\bpublic\b", t) and not re.search(r"privado|private|no listado|unlisted|programado|scheduled", t): return "publico"
+        if re.search(r"privado|private", t): return "privado"
+    except Cancelled: raise
+    except Exception as e: print("  No pude verificar la visibilidad:", str(e)[:80])
+    return None
+
 def textos_para_subir(it, cfg):
     """Titulo/descripcion de IA. Si ya se generaron al editar se usan; si no, se intenta ahora.
     Devuelve (titulo o None, descripcion o ''). None = dejar el titulo que pone Studio (nombre del archivo)."""
@@ -482,7 +517,8 @@ def textos_para_subir(it, cfg):
 
 def studio_upload_one(tab, cid, it, cfg=None):
     titulo, desc = textos_para_subir(it, cfg)
-    cuerpo = (desc + "\n\n" if desc else "") + (f"#Shorts\n" if it["kind"] == "short" and "#shorts" not in desc.lower() else "") + f"Fuente: {it['url']}"
+    cuerpo = (desc + "\n\n" if desc else "") + ("#Shorts" if it["kind"] == "short" and "#shorts" not in desc.lower() else "")
+    cuerpo = cuerpo.strip()
     now_mode = not it.get("publishAt")
     when = None if now_mode else local(it["publishAt"])
     size_mb = os.path.getsize(it["file"]) / 1048576
@@ -531,10 +567,14 @@ def studio_upload_one(tab, cid, it, cfg=None):
         time.sleep(1.5)
     paso("publicando" if now_mode else "programando")
     if not tab.clic_visible("#done-button", True, True): raise RuntimeError("No encontré el botón final de publicar")
-    fin = time.time() + 120
-    while tab.visible("#done-button") and not tab.visible("ytcp-video-share-dialog"):   # cuando Studio cierra el formulario, ya se publicó
+    fin = time.time() + 180; forzado = 0
+    while True:                                   # cuando Studio cierra el formulario (o muestra "Video publicado"), ya se publicó
         chk()
+        if publicar_de_todas_formas(tab):         # aviso "Aún estamos comprobando tu contenido"
+            forzado += 1; paso("Studio avisó que sigue comprobando: 'Publicar de todas formas'"); time.sleep(2); continue
+        if tab.visible("ytcp-video-share-dialog") or not tab.visible("#done-button"): break
         if time.time() > fin: raise RuntimeError("Studio no confirmó la publicación (el botón final sigue ahí)")
+        if forzado == 0 and int(time.time() - fin) % 25 == 0 and tab.habilitado("#done-button"): tab.clic_visible("#done-button", True, True)   # el clic no se registro: reintento
         time.sleep(1)
     time.sleep(2)
     try:
@@ -543,6 +583,14 @@ def studio_upload_one(tab, cid, it, cfg=None):
         if link: it["yt_url"] = link
     except Exception: pass
     _clic_primero(tab, ["#close-button", "ytcp-button#close-button"])
+    it.pop("aviso", None)
+    if now_mode:
+        paso("verificando que quedó Público")
+        v = verificar_publicado(tab, cid, it, chk)
+        if v == "publico": print("  Verificado: el video figura como Público.")
+        elif v == "privado":
+            it["aviso"] = "YouTube lo dejó en Privado (probablemente por la comprobación de derechos). Revisalo en Studio."; print("  AVISO:", it["aviso"])
+        else: print("  No pude confirmar la visibilidad en la lista de Studio (el video sí se envió a publicar).")
     it["status"] = "published" if now_mode else "scheduled"; it["pct"] = 100
     it["stage"] = "Publicado" if now_mode else "Programado"; it.pop("est", None)
 

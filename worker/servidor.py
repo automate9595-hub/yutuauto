@@ -76,7 +76,7 @@ def queue_items():
     global _LAST_ITEMS
     try:
         d = json.loads((ROOT / "queue.json").read_text("utf-8"))
-        _LAST_ITEMS = [dict({k: i.get(k) for k in ("id", "key", "type", "kind", "title", "status", "publishAt", "error", "url", "pct", "stage", "est", "ia", "ia_title", "yt_url")},
+        _LAST_ITEMS = [dict({k: i.get(k) for k in ("id", "key", "type", "kind", "title", "status", "publishAt", "error", "url", "pct", "stage", "est", "ia", "ia_title", "yt_url", "aviso")},
                             hasfile=bool(i.get("id") and (MEDIA / f"{i['id']}_final.mp4").exists())) for i in d.get("items", [])]
     except Exception:
         pass
