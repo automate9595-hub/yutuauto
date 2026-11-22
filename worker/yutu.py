@@ -371,6 +371,47 @@ def _clic_primero(tab, selectores, idx=0, espera=0):
         except Exception: pass
     return False
 
+JS_NO_NINOS = r"""(function(){
+var re=/\bno\b[\s,]+(no\s+)?(es|est[aá]|son|fue)\b[^]*ni\S{1,3}os|not\s+made\s+for\s+kids|NOT_MADE_FOR_KIDS/i;
+var a=window.__A("tp-yt-paper-radio-button,[role=radio],input[type=radio],ytkc-made-for-kids-select label,ytkc-made-for-kids-select *");
+var best=null;
+for(var i=0;i<a.length;i++){var e=a[i];
+ var t=((e.innerText||e.textContent||'')+' '+(e.getAttribute('name')||'')+' '+(e.getAttribute('aria-label')||'')+' '+(e.id||'')).trim();
+ if(!re.test(t))continue;
+ var r=e.getBoundingClientRect();
+ var esRadio=/radio/i.test(e.tagName+(e.getAttribute('role')||''));
+ var score=(r.width>0?0:1000)+(esRadio?0:50)+t.length;
+ if(!best||score<best.score)best={e:e,score:score};}
+if(!best)return null;
+best.e.scrollIntoView({block:'center'});
+var r=best.e.getBoundingClientRect();
+var on=best.e.getAttribute('aria-checked')==='true'||best.e.checked===true||best.e.hasAttribute('checked');
+return {x:r.left+r.width/2,y:r.top+r.height/2,w:r.width,h:r.height,on:on};})()"""
+JS_NO_NINOS_CLICK = JS_NO_NINOS.replace("var r=best.e.getBoundingClientRect();\nvar on", "best.e.click();var r=best.e.getBoundingClientRect();\nvar on")
+
+def marcar_no_ninos(tab, chk):
+    """Marca 'No, no es contenido para niños' en español o ingles, con o sin el atributo name de Studio."""
+    for intento in range(6):
+        chk()
+        try:
+            c = tab.eval(JS_NO_NINOS)
+            if c and c.get("on"): return True
+            if c and c["w"] > 0 and c["h"] > 0:
+                for t in ("mousePressed", "mouseReleased"):
+                    tab.call("Input.dispatchMouseEvent", {"type": t, "x": c["x"], "y": c["y"], "button": "left", "clickCount": 1})
+                time.sleep(0.6)
+                c2 = tab.eval(JS_NO_NINOS)
+                if c2 and c2.get("on"): return True
+                tab.eval(JS_NO_NINOS_CLICK)
+                time.sleep(0.5)
+                c3 = tab.eval(JS_NO_NINOS)
+                if c3 and c3.get("on"): return True
+                return True        # se hizo clic; algunas versiones de Studio no exponen el estado marcado
+        except Exception as e:
+            if type(e).__name__ == "Cancelled": raise
+        time.sleep(1.5)
+    return False
+
 def textos_para_subir(it, cfg):
     """Titulo/descripcion de IA. Si ya se generaron al editar se usan; si no, se intenta ahora.
     Devuelve (titulo o None, descripcion o ''). None = dejar el titulo que pone Studio (nombre del archivo)."""
@@ -410,9 +451,9 @@ def studio_upload_one(tab, cid, it, cfg=None):
     paso("escribiendo la descripción")
     tab.escribir("#textbox", cuerpo, 1); time.sleep(0.5)
     paso("marcando 'no es para niños'")
-    if not _clic_primero(tab, ["[name='VIDEO_MADE_FOR_KIDS_NOT_MADE_FOR_KIDS']"], 0, 20):
-        if not tab.clic_texto(r"^(no,? no es para ni|no,? it'?s not made for kids)", "tp-yt-paper-radio-button, *[role=radio]"):
-            raise RuntimeError("No encontré la opción 'No es contenido para niños'")
+    if not marcar_no_ninos(tab, chk):
+        print("  Aviso: no encontré la opción 'No es para niños'; sigo y dejo diagnóstico por si Studio la pide.")
+        tab.captura(ROOT / "aviso-ninos.png"); tab.diagnostico(ROOT / "diagnostico-ninos.txt", "No encontré la opcion de 'para niños'")
     time.sleep(0.6)
     # Siguiente hasta llegar a Visibilidad (Detalles -> Elementos del video -> Comprobaciones -> Visibilidad)
     for n in range(1, 8):
