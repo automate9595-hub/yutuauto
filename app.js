@@ -181,3 +181,26 @@ $("pl-on").onclick=()=>plSend(true);$("pl-off").onclick=()=>plSend(false);
 async function plPoll(){if(document.hidden)return;const s=await call("/status");if(!s||!s.piloto)return;const p=s.piloto;
 $("pl-estado").textContent=(p.activo?"🟢 Activo · ":"⏸ En pausa · ")+(p.estado||"Esperando el primer ciclo (hasta 1 min).")+(p.hist&&p.hist.length?" · Último: "+p.hist[p.hist.length-1].t.slice(0,60):"")}
 setInterval(plPoll,8000);plPoll();
+
+/* ---------- piloto TikTok ---------- */
+const TT_K="yutu-tiktok",tt=Object.assign({cuenta:"",orden:"seguidilla",por_dia:5,dias:30,verificar:true},load(TT_K,{}));
+const ttIds={cuenta:"tt-cuenta",orden:"tt-orden",por_dia:"tt-dia",dias:"tt-dias"};
+for(const k in ttIds){const el=$(ttIds[k]);el.value=tt[k];el.oninput=()=>{tt[k]=el.type==="number"?Math.max(0,+el.value||0):el.value;try{localStorage.setItem(TT_K,JSON.stringify(tt))}catch{}}}
+$("tt-ver").checked=!!tt.verificar;$("tt-ver").onchange=e=>{tt.verificar=e.target.checked;try{localStorage.setItem(TT_K,JSON.stringify(tt))}catch{}};
+const ttSend=async activo=>{const m=$("tt-msg");if(activo&&!tt.cuenta.trim()){m.textContent="Escribí la cuenta de TikTok.";m.className="msg err";return}
+const r=await call("/piloto-tiktok",{...tt,activo,config:cfg},8000);m.className="msg"+(r&&r.ok?"":" err");m.textContent=r?r.message:"No encuentro el worker. Ejecutá 2-INSTALAR-Y-EJECUTAR.bat.";ttPoll()};
+$("tt-on").onclick=()=>ttSend(true);$("tt-off").onclick=()=>ttSend(false);
+async function ttPoll(){if(document.hidden)return;const s=await call("/status");if(!s||!s.tiktok||!s.tiktok.cuenta)return;const p=s.tiktok;
+$("tt-estado").textContent=(p.activo?"🟢 Activo · ":"⏸ En pausa · ")+p.cuenta+" · "+(p.estado||"Esperando el primer ciclo (hasta 1 min).")}
+setInterval(ttPoll,8000);ttPoll();
+
+/* ---------- piloto TikTok por tema ---------- */
+const TM_K="yutu-tema-tt",tm=Object.assign({tema:"",shorts:10,videos:3,dias:30},load(TM_K,{}));
+const tmIds={tema:"tm-tema",shorts:"tm-shorts",videos:"tm-videos",dias:"tm-dias"};
+for(const k in tmIds){const el=$(tmIds[k]);el.value=tm[k];el.oninput=()=>{tm[k]=el.type==="number"?Math.max(0,+el.value||0):el.value;try{localStorage.setItem(TM_K,JSON.stringify(tm))}catch{}}}
+const tmSend=async activo=>{const m=$("tm-msg");if(activo&&!tm.tema.trim()){m.textContent="Escribí el tema central.";m.className="msg err";return}
+const r=await call("/piloto-tema-tiktok",{...tm,activo,config:cfg},8000);m.className="msg"+(r&&r.ok?"":" err");m.textContent=r?r.message:"No encuentro el worker. Ejecutá 2-INSTALAR-Y-EJECUTAR.bat.";tmPoll()};
+$("tm-on").onclick=()=>tmSend(true);$("tm-off").onclick=()=>tmSend(false);
+async function tmPoll(){if(document.hidden)return;const s=await call("/status");if(!s||!s.tema_tt||!s.tema_tt.tema)return;const p=s.tema_tt;
+$("tm-estado").textContent=(p.activo?"🟢 Activo · ":"⏸ En pausa · ")+(p.estado||"Esperando el primer ciclo (hasta 1 min).")+(p.fuentes?" · "+p.fuentes.length+" fuentes encontradas":"")}
+setInterval(tmPoll,8000);tmPoll();

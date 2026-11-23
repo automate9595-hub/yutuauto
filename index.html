@@ -22,6 +22,29 @@
 <div class="row"><button class="btn pri" id="pl-on" type="button">Activar piloto ▶</button><button class="btn ghost" id="pl-off" type="button">Pausar</button><span id="pl-msg" class="msg"></span></div>
 <small id="pl-estado" class="sub"></small></section>
 
+<section class="card pad" id="tiktok" style="display:grid;gap:12px;margin:0 0 16px">
+<h3 style="margin:0">🎵 Piloto TikTok: de una cuenta a tu YouTube</h3>
+<p class="sub" style="margin:0">Pasá una cuenta de TikTok. El piloto toma sus videos de a uno, la IA verifica que sean de Mobile Legends, los edita con tu configuración y los sube. Nunca repite uno.</p>
+<div class="row"><input id="tt-cuenta" type="text" placeholder="@cuenta o https://www.tiktok.com/@cuenta" style="flex:1;min-width:220px" autocomplete="off"></div>
+<div class="cfg" style="grid-template-columns:repeat(auto-fit,minmax(140px,1fr))">
+<label>Orden<select id="tt-orden"><option value="seguidilla">En seguidilla (del más nuevo al más viejo)</option><option value="aleatorio">Aleatorio</option><option value="relevantes">Los más vistos primero</option></select></label>
+<label>Videos por día<input id="tt-dia" type="number" min="1" max="60"></label>
+<label>Durante (días)<input id="tt-dias" type="number" min="1" max="365"></label></div>
+<label class="chk"><input id="tt-ver" type="checkbox"> La IA verifica que sea de Mobile Legends antes de descargar</label>
+<div class="row"><button class="btn pri" id="tt-on" type="button">Activar piloto TikTok ▶</button><button class="btn ghost" id="tt-off" type="button">Pausar</button><span id="tt-msg" class="msg"></span></div>
+<small id="tt-estado" class="sub"></small></section>
+
+<section class="card pad" id="tema-tt" style="display:grid;gap:12px;margin:0 0 16px">
+<h3 style="margin:0">🎲 Piloto TikTok por tema: la IA busca las fuentes</h3>
+<p class="sub" style="margin:0">Escribí solo el tema. La IA propone hashtags y cuentas de TikTok distintas, toma videos al azar, verifica que sean del tema y los sube a tu canal. Nunca repite.</p>
+<div class="row"><input id="tm-tema" type="search" placeholder="Tema central · ej: Mobile Legends" style="flex:1;min-width:220px" autocomplete="off"></div>
+<div class="cfg" style="grid-template-columns:repeat(auto-fit,minmax(130px,1fr))">
+<label>Shorts por día<input id="tm-shorts" type="number" min="0" max="60"></label>
+<label>Videos por día<input id="tm-videos" type="number" min="0" max="30"></label>
+<label>Durante (días)<input id="tm-dias" type="number" min="1" max="365"></label></div>
+<div class="row"><button class="btn pri" id="tm-on" type="button">Activar piloto ▶</button><button class="btn ghost" id="tm-off" type="button">Pausar</button><span id="tm-msg" class="msg"></span></div>
+<small id="tm-estado" class="sub"></small></section>
+
 <div class="wiz" id="wiz">
 
 <!-- 1 -->
@@ -161,4 +184,4 @@
 
 <div class="dock"><div id="dock-msg" class="dock-msg">Listo para procesar</div><button class="btn pri" id="dock-go" type="button">Procesar y publicar todo ⚡</button></div>
 <div id="win" class="win-back" aria-hidden="true"><div class="win" role="dialog" aria-modal="true"><div class="win-bar"><span class="d r" data-close></span><span class="d y" data-close></span><span class="d g"></span><b id="win-title"></b></div><div id="win-body" class="win-body"></div></div></div>
-<footer>Yutu Studio · v15.0</footer><script src="app.js"></script></body></html>
+<footer>Yutu Studio · v17.0</footer><script src="app.js"></script></body></html>

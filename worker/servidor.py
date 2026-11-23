@@ -199,7 +199,9 @@ class H(BaseHTTPRequestHandler):
             return self._send({"ok": bool(partes), "carpeta": str(ROOT), "png": (ROOT / "error-subida.png").exists(),
                                "text": "\n\n".join(partes) or "Todavía no hay diagnóstico guardado (no hubo errores de subida)."})
         refresh_login()
-        self._send({"ok": True, **state, "log": LOG[-40:], "items": queue_items(), "ia": ia.estado(), "piloto": {k: v for k, v in piloto.leer().items() if k not in ("usados", "config")}})
+        self._send({"ok": True, **state, "log": LOG[-40:], "items": queue_items(), "ia": ia.estado(), "piloto": {k: v for k, v in piloto.leer().items() if k not in ("usados", "config")},
+                               "tiktok": {k: v for k, v in piloto.leer_tt().items() if k not in ("usados", "rechazados", "lista")},
+                               "tema_tt": {k: v for k, v in piloto.leer_tm().items() if k not in ("usados", "rechazados", "cache", "muertas", "hist")}})
     def do_POST(self):
         if self._bad_origin(): return self._send({"ok": False}, 403)
         n = int(self.headers.get("Content-Length") or 0); data = json.loads(self.rfile.read(n) or b"{}")
@@ -235,6 +237,22 @@ class H(BaseHTTPRequestHandler):
             except Exception as e: return self._send({"ok": False, "message": "Datos inválidos: " + str(e)})
             log("Piloto automático " + ("ACTIVADO" if p["activo"] else "pausado") + f": «{p['tema']}» · {p['shorts']} Shorts + {p['videos']} Videos al día · {p['dias']} días")
             return self._send({"ok": True, "message": "Piloto activado." if p["activo"] else "Piloto en pausa.", "piloto": {k: v for k, v in p.items() if k not in ("usados", "config")}})
+        if self.path == "/piloto-tiktok":
+            try:
+                p = piloto.configurar_tt(data)
+                if p["activo"] and not p["cuenta"]: p["activo"] = False; piloto.guardar_tt(p); return self._send({"ok": False, "message": "Escribí la cuenta de TikTok."})
+                if data.get("config"): p["config"] = data["config"]; piloto.guardar_tt(p)
+            except Exception as e: return self._send({"ok": False, "message": "Datos inválidos: " + str(e)})
+            log("Piloto TikTok " + ("ACTIVADO" if p["activo"] else "pausado") + f": {p['cuenta']} · {p['por_dia']}/día · {p['orden']} · {p['dias']} días")
+            return self._send({"ok": True, "message": "Piloto TikTok activado." if p["activo"] else "Piloto TikTok en pausa."})
+        if self.path == "/piloto-tema-tiktok":
+            try:
+                p = piloto.configurar_tm(data)
+                if p["activo"] and not p["tema"]: p["activo"] = False; piloto.guardar_tm(p); return self._send({"ok": False, "message": "Escribí el tema central."})
+                if data.get("config"): p["config"] = data["config"]; piloto.guardar_tm(p)
+            except Exception as e: return self._send({"ok": False, "message": "Datos inválidos: " + str(e)})
+            log("Piloto TikTok por tema " + ("ACTIVADO" if p["activo"] else "pausado") + f": «{p['tema']}» · {p['shorts']} Shorts + {p['videos']} Videos/día · {p['dias']} días")
+            return self._send({"ok": True, "message": "Piloto activado." if p["activo"] else "Piloto en pausa."})
         if self.path == "/cancel":
             request_cancel(data.get("key"), bool(data.get("all")))
             return self._send({"ok": True, "message": "Cancelando..." if state["running"] else "Cancelado."})
@@ -256,13 +274,16 @@ class H(BaseHTTPRequestHandler):
 
 MAX_AUTO = 8
 def _piloto_tick():
-    """Si el piloto está activo y toca el siguiente video del día: lo busca, lo agrega a la cola y lanza todo el proceso."""
-    p = piloto.leer()
-    if not p.get("activo"): return
-    d = read_queue() or {"config": p.get("config") or {}, "items": []}
-    nuevos = piloto.tick(d.get("items", []), log)
+    """Si algún piloto (búsqueda o TikTok) está activo y toca el siguiente video del día: lo agrega a la cola y lanza todo el proceso."""
+    pa, pt, pm = piloto.leer(), piloto.leer_tt(), piloto.leer_tm()
+    if not (pa.get("activo") or pt.get("activo") or pm.get("activo")): return
+    d = read_queue() or {"config": pa.get("config") or pt.get("config") or pm.get("config") or {}, "items": []}
+    nuevos = []
+    if pa.get("activo"): nuevos += piloto.tick(d.get("items", []), log)
+    if pt.get("activo"): nuevos += piloto.tick_tt(d.get("items", []) + nuevos, log)
+    if pm.get("activo"): nuevos += piloto.tick_tm(d.get("items", []) + nuevos, log)
     if not nuevos: return
-    d.setdefault("config", p.get("config") or {}); d["config"]["publish"] = "now"
+    d.setdefault("config", pa.get("config") or pt.get("config") or pm.get("config") or {}); d["config"]["publish"] = "now"
     d["items"] = d.get("items", []) + nuevos; write_queue(d)
     if not launch_chrome(): log("Piloto: no pude abrir Chrome; lo dejo en la cola."); return
     try: (ROOT / "cancel.json").unlink()
