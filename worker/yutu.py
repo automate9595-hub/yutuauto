@@ -578,6 +578,38 @@ def vigilar_subida(tab, real):
         if _PROG["pct"] != real: _PROG["pct"], _PROG["t"] = real, time.time()
         elif time.time() - _PROG["t"] > STALL_S: raise SubidaInterrumpida(f"la subida no avanza hace {STALL_S // 60} min (quedó en {real} %)")
 
+RE_SUBIENDO = re.compile(r"subi[eé]ndose|se est[aá] subiendo|subiendo|uploading|\d{1,3}\s*%\s*(?:subid|uploaded)|tiempo restante|time remaining|quedan?\s+\d|\d+\s*(?:minutos?|segundos?|minutes?|seconds?)\s+(?:restantes?|left|remaining)", re.I)
+RE_YA_SUBIDO = re.compile(r"procesando|processing|comprobaci|checks|subida completada|upload complete|v[ií]deo publicado|video published", re.I)
+
+def texto_subida(tab):
+    """Todo el texto visible que indique que la subida sigue (diálogo 'Se está subiendo el vídeo', panel flotante, cuadro de subida)."""
+    try:
+        return tab.eval("(function(){var o=[];window.__A('ytcp-uploads-dialog,ytcp-dialog,tp-yt-paper-dialog,ytcp-multi-progress-monitor,ytcp-video-upload-progress,ytcp-uploads-still-processing-dialog').forEach(function(e){var r=e.getBoundingClientRect();if(r.width>0)o.push(e.innerText||'')});"
+                        "if(!o.length){(document.body.innerText||'').split('\\n').forEach(function(l){if(/subi[eé]ndose|subiendo|uploading|restante|remaining/i.test(l))o.push(l)})}return o.join(' | ')})()") or ""
+    except Exception: return ""
+
+def subida_en_curso(tab):
+    """True mientras Studio siga mostrando que el archivo se está subiendo (porcentaje o tiempo restante)."""
+    t = texto_subida(tab)
+    if not t.strip(): return False
+    if RE_SUBIENDO.search(t) and not re.search(r"subi[eé]ndose|subiendo|uploading", t, re.I) and RE_YA_SUBIDO.search(t): return False   # solo 'procesando ... quedan X min': ya está en YouTube
+    return bool(RE_SUBIENDO.search(t))
+
+def esperar_subida_terminada(tab, it, t0, size_mb, chk, limite=None):
+    """NO deja cerrar ni navegar hasta que desaparezca el porcentaje / tiempo restante de la subida (si no, YouTube la corta)."""
+    limite = limite or max(1800, int(size_mb * 20) + 900); fin = time.time() + limite; libres = 0
+    paso("esperando a que termine de subirse (no cierro hasta que no quede tiempo restante)")
+    while time.time() < fin:
+        chk()
+        try: up_progress(tab, it, t0, size_mb)          # avisa si se corta o se estanca
+        except SubidaInterrumpida: raise
+        except Exception: pass
+        if subida_en_curso(tab): libres = 0
+        else: libres += 1
+        if libres >= 6: return                            # ~9 s seguidos sin nada de subida
+        time.sleep(1.5)
+    raise SubidaInterrumpida(f"La subida seguía en curso después de {limite // 60} min")
+
 def up_progress(tab, it, t0, size_mb):
     """Porcentaje de subida: lo lee de Studio si puede; si no, lo estima (marcado con ~). Si la subida se corta, avisa."""
     frac = real = None
@@ -746,6 +778,7 @@ def _cierre_dialogo(tab, cid, it, chk, t0, size_mb, now_mode, when):
         if forzado == 0 and int(time.time() - fin) % 25 == 0 and tab.habilitado("#done-button"): tab.clic_visible("#done-button", True, True)   # el clic no se registro: reintento
         time.sleep(1)
     time.sleep(2)
+    esperar_subida_terminada(tab, it, t0, size_mb, chk)      # <- antes de cerrar el diálogo o abrir otra página
     try:
         link = tab.eval("(function(){var a=window.__A(\"a[href*='youtu.be/'],a[href*='youtube.com/shorts/'],a[href*='youtube.com/watch']\");"
                         "for(var i=0;i<a.length;i++){var r=a[i].getBoundingClientRect();if(r.width>0)return a[i].href}return ''})()")
@@ -755,18 +788,8 @@ def _cierre_dialogo(tab, cid, it, chk, t0, size_mb, now_mode, when):
     _finalizar(tab, cid, it, chk, now_mode)
 
 def esperar_fin_subida(tab, it, t0, size_mb, chk, limite=1800):
-    """En la página de edición / lista: espera a que el panel 'Subiendo...' termine (si se corta otra vez, avisa)."""
-    paso("esperando que termine la subida reanudada"); fin = time.time() + limite; vio = False; libres = 0; ini = time.time()
-    while time.time() < fin:
-        chk(); up_progress(tab, it, t0, size_mb)
-        txt = texto_progreso(tab)
-        hay = tab.visible("ytcp-multi-progress-monitor") or bool(re.search(r"subiendo|uploading|\d{1,3}\s*%\s*subid", txt, re.I))
-        if re.search(r"subida completada|upload complete|checks complete|procesando|processing|finaliz|completad", txt, re.I) and not re.search(r"subiendo|uploading", txt, re.I): return
-        if hay: vio = True; libres = 0
-        else: libres += 1
-        if (vio and libres >= 4) or (not vio and time.time() - ini > 25): return
-        time.sleep(1.5)
-    raise SubidaInterrumpida("La subida reanudada tardó más de 30 minutos")
+    """En la página de edición / lista: espera a que desaparezca el panel 'Subiendo...' y su tiempo restante."""
+    esperar_subida_terminada(tab, it, t0, size_mb, chk, max(limite, int(size_mb * 20) + 900))
 
 def abrir_visibilidad_edicion(tab, chk):
     """En la página de edición: abre el selector de Visibilidad (Borrador/Privado ▾)."""

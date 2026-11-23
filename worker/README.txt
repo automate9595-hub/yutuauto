@@ -18,6 +18,10 @@ El titulo y la descripcion los escribe la IA; si ninguna responde, se sube con e
 Si una subida falla: worker\error-subida.png y worker\diagnostico-subida.txt muestran donde se quedo.
 Registro: worker.log. Videos terminados: carpeta media.
 
+NOVEDADES v15
+- CORRECCION: ya no se cierra el cuadro de subida ni se cambia de pagina mientras Studio muestre porcentaje o tiempo restante de subida; espera a que desaparezca. Si se corta, reanuda sola.
+- PILOTO AUTOMATICO (arriba en la web): tema central + Shorts/Videos por dia + dias. La IA busca el video mas relevante que nunca se uso, lo descarga, edita y sube. Estado en worker\piloto.json.
+
 NOVEDADES v14
 - SUBIDA QUE SE CORTA: si Studio muestra "La subida se ha interrumpido" (o el porcentaje no avanza 7 min, o se cae internet/Chrome),
   el worker busca solo la fila en Contenido del canal, toca "Reanudar subida", entrega el archivo de la carpeta media (sin abrir la

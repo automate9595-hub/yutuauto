@@ -1,5 +1,5 @@
 """Servidor local: conecta la web con el worker (solo 127.0.0.1)."""
-import ia, json, os, pathlib, socket, subprocess, sys, threading, time, urllib.request
+import ia, piloto, json, os, pathlib, socket, subprocess, sys, threading, time, urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 ROOT = pathlib.Path(__file__).parent
 MEDIA = ROOT / "media"
@@ -199,7 +199,7 @@ class H(BaseHTTPRequestHandler):
             return self._send({"ok": bool(partes), "carpeta": str(ROOT), "png": (ROOT / "error-subida.png").exists(),
                                "text": "\n\n".join(partes) or "Todavía no hay diagnóstico guardado (no hubo errores de subida)."})
         refresh_login()
-        self._send({"ok": True, **state, "log": LOG[-40:], "items": queue_items(), "ia": ia.estado()})
+        self._send({"ok": True, **state, "log": LOG[-40:], "items": queue_items(), "ia": ia.estado(), "piloto": {k: v for k, v in piloto.leer().items() if k not in ("usados", "config")}})
     def do_POST(self):
         if self._bad_origin(): return self._send({"ok": False}, 403)
         n = int(self.headers.get("Content-Length") or 0); data = json.loads(self.rfile.read(n) or b"{}")
@@ -228,6 +228,13 @@ class H(BaseHTTPRequestHandler):
         if self.path == "/ia-test":
             ok, msg = ia.probar(data.get("proveedor", ""))
             return self._send({"ok": ok, "message": msg})
+        if self.path == "/piloto":                   # piloto automático: tema + cupo diario + días
+            try:
+                p = piloto.configurar(data)
+                if data.get("config"): p["config"] = data["config"]; piloto.guardar(p)
+            except Exception as e: return self._send({"ok": False, "message": "Datos inválidos: " + str(e)})
+            log("Piloto automático " + ("ACTIVADO" if p["activo"] else "pausado") + f": «{p['tema']}» · {p['shorts']} Shorts + {p['videos']} Videos al día · {p['dias']} días")
+            return self._send({"ok": True, "message": "Piloto activado." if p["activo"] else "Piloto en pausa.", "piloto": {k: v for k, v in p.items() if k not in ("usados", "config")}})
         if self.path == "/cancel":
             request_cancel(data.get("key"), bool(data.get("all")))
             return self._send({"ok": True, "message": "Cancelando..." if state["running"] else "Cancelado."})
@@ -248,11 +255,26 @@ class H(BaseHTTPRequestHandler):
         self._send({"ok": False}, 404)
 
 MAX_AUTO = 8
+def _piloto_tick():
+    """Si el piloto está activo y toca el siguiente video del día: lo busca, lo agrega a la cola y lanza todo el proceso."""
+    p = piloto.leer()
+    if not p.get("activo"): return
+    d = read_queue() or {"config": p.get("config") or {}, "items": []}
+    nuevos = piloto.tick(d.get("items", []), log)
+    if not nuevos: return
+    d.setdefault("config", p.get("config") or {}); d["config"]["publish"] = "now"
+    d["items"] = d.get("items", []) + nuevos; write_queue(d)
+    if not launch_chrome(): log("Piloto: no pude abrir Chrome; lo dejo en la cola."); return
+    try: (ROOT / "cancel.json").unlink()
+    except Exception: pass
+    threading.Thread(target=run_job, args=(["--modo", "now"],), daemon=True).start()
+
 def vigilante():
     """Cada minuto: si una subida quedó cortada (marcada 'reanudar') y no hay nada en marcha, la retoma sola, sin que toques nada."""
     while True:
         time.sleep(60)
         try:
+            if not state["running"]: _piloto_tick()
             d = read_queue()
             if not d or state["running"] or not d.get("config", {}).get("auto_reanudar", True): continue
             ahora = time.time()

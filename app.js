@@ -170,3 +170,14 @@ if(!r)return openWin("Diagnóstico",'<p>No encuentro el worker. Ejecutá 2-INSTA
 openWin("Diagnóstico de la última subida",`<p class="sub">Carpeta: <code>${esc(r.carpeta||"")}</code></p><div class="row"><button class="btn pri sm" id="diag-copy" type="button">Copiar todo</button></div><pre class="log" id="diag-txt" style="height:240px;margin-top:10px">${esc(r.text||"")}</pre>${r.png?`<img src="${API}/diag.png?t=${Date.now()}" alt="Captura del error" style="margin-top:12px">`:""}`);
 const c=$("diag-copy");if(c)c.onclick=async()=>{const t=$("diag-txt").textContent;try{await navigator.clipboard.writeText(t)}catch{const a=document.createElement("textarea");a.value=t;document.body.appendChild(a);a.select();document.execCommand("copy");a.remove()}c.textContent="¡Copiado!"}}
 $("diag-btn").onclick=verDiag;
+
+/* ---------- piloto automático ---------- */
+const PL_K="yutu-piloto",pl=Object.assign({tema:"",shorts:10,videos:3,dias:30,por_video:3},load(PL_K,{}));
+const plIds={tema:"pl-tema",shorts:"pl-shorts",videos:"pl-videos",dias:"pl-dias",por_video:"pl-pv"};
+for(const k in plIds){const el=$(plIds[k]);el.value=pl[k];el.oninput=()=>{pl[k]=el.type==="number"?Math.max(0,+el.value||0):el.value;try{localStorage.setItem(PL_K,JSON.stringify(pl))}catch{}}}
+const plSend=async activo=>{const m=$("pl-msg");if(activo&&!pl.tema.trim()){m.textContent="Escribí un tema central.";m.className="msg err";return}
+const r=await call("/piloto",{...pl,activo,config:cfg},8000);m.className="msg"+(r&&r.ok?"":" err");m.textContent=r?r.message:"No encuentro el worker. Ejecutá 2-INSTALAR-Y-EJECUTAR.bat.";plPoll()};
+$("pl-on").onclick=()=>plSend(true);$("pl-off").onclick=()=>plSend(false);
+async function plPoll(){if(document.hidden)return;const s=await call("/status");if(!s||!s.piloto)return;const p=s.piloto;
+$("pl-estado").textContent=(p.activo?"🟢 Activo · ":"⏸ En pausa · ")+(p.estado||"Esperando el primer ciclo (hasta 1 min).")+(p.hist&&p.hist.length?" · Último: "+p.hist[p.hist.length-1].t.slice(0,60):"")}
+setInterval(plPoll,8000);plPoll();

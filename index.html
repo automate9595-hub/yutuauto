@@ -10,6 +10,18 @@
 <p>Seguí los pasos de abajo y elegí lo que quieras en cada uno. Al final, un solo botón descarga, recorta, subtitula, edita y publica en tu canal.</p></div>
 <div class="stats"><div class="stat"><small>EN COLA</small><strong id="s-total">0</strong></div><div class="stat"><small>SHORTS</small><strong id="s-short">0</strong></div><div class="stat"><small>VIDEOS</small><strong id="s-video">0</strong></div><div class="stat acc"><small>PUBLICADOS</small><strong id="s-pub">0</strong></div></div></section>
 
+<section class="card pad" id="piloto" style="display:grid;gap:12px;margin:0 0 16px">
+<h3 style="margin:0">🔎 Piloto automático: buscar, descargar y publicar solo</h3>
+<p class="sub" style="margin:0">Escribí un tema central. La IA busca el video más relevante (sin repetir nunca el mismo), descarga, edita y lo sube. Usa tu configuración de los pasos de abajo.</p>
+<div class="row"><input id="pl-tema" type="search" placeholder="Tema central · ej: momentos graciosos de Mobile Legends" style="flex:1;min-width:220px" autocomplete="off"></div>
+<div class="cfg" style="grid-template-columns:repeat(auto-fit,minmax(130px,1fr))">
+<label>Shorts por día<input id="pl-shorts" type="number" min="0" max="60"></label>
+<label>Videos por día<input id="pl-videos" type="number" min="0" max="30"></label>
+<label>Durante (días)<input id="pl-dias" type="number" min="1" max="365"></label>
+<label>Shorts por video fuente<input id="pl-pv" type="number" min="1" max="10"></label></div>
+<div class="row"><button class="btn pri" id="pl-on" type="button">Activar piloto ▶</button><button class="btn ghost" id="pl-off" type="button">Pausar</button><span id="pl-msg" class="msg"></span></div>
+<small id="pl-estado" class="sub"></small></section>
+
 <div class="wiz" id="wiz">
 
 <!-- 1 -->
@@ -149,4 +161,4 @@
 
 <div class="dock"><div id="dock-msg" class="dock-msg">Listo para procesar</div><button class="btn pri" id="dock-go" type="button">Procesar y publicar todo ⚡</button></div>
 <div id="win" class="win-back" aria-hidden="true"><div class="win" role="dialog" aria-modal="true"><div class="win-bar"><span class="d r" data-close></span><span class="d y" data-close></span><span class="d g"></span><b id="win-title"></b></div><div id="win-body" class="win-body"></div></div></div>
-<footer>Yutu Studio · v14.0</footer><script src="app.js"></script></body></html>
+<footer>Yutu Studio · v15.0</footer><script src="app.js"></script></body></html>
