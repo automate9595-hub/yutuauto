@@ -1,4 +1,4 @@
-YUTU WORKER (v13)
+YUTU WORKER (v14)
 1) Ejecuta 2-INSTALAR-Y-EJECUTAR.bat. Instala todo con pip, se cierra solo y deja el worker
    en segundo plano con un icono "Y" junto al wifi/bateria (verde = activo, azul = procesando).
 2) En la web hay 9 pasos desplegables: Conectar, Videos, Subtitulos, Recorte, Efectos, IA, Publicacion,
@@ -17,3 +17,11 @@ El titulo y la descripcion los escribe la IA; si ninguna responde, se sube con e
 
 Si una subida falla: worker\error-subida.png y worker\diagnostico-subida.txt muestran donde se quedo.
 Registro: worker.log. Videos terminados: carpeta media.
+
+NOVEDADES v14
+- SUBIDA QUE SE CORTA: si Studio muestra "La subida se ha interrumpido" (o el porcentaje no avanza 7 min, o se cae internet/Chrome),
+  el worker busca solo la fila en Contenido del canal, toca "Reanudar subida", entrega el archivo de la carpeta media (sin abrir la
+  ventana de Windows) y sigue hasta publicar. Hasta 5 intentos seguidos; si no alcanza, el vigilante lo reintenta cada pocos minutos
+  (hasta 8 veces). Tambien revisa al empezar si quedo alguna subida cortada de antes. Se apaga en el paso 7 (casilla "reanudarla sola").
+- VARIOS SHORTS DE UN VIDEO LARGO: en el paso 4 elegis cuantos Shorts sacar y cada cuantas horas sale uno (o ajustas la cantidad en cada
+  video de la cola). La IA elige los mejores momentos distintos; sin IA se reparten parejo. Los archivos quedan como ID_p1_final.mp4, ID_p2_final.mp4...

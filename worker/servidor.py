@@ -72,12 +72,13 @@ def refresh_login():
         state["detail"] = "Chrome abierto, pero no veo YouTube Studio con tu canal. Pestanas: " + hosts
 
 _LAST_ITEMS = []
+def _fid(i): return i.get("id", "") + (f"_p{i['part']}" if (i.get("parts") or 1) > 1 else "")
 def queue_items():
     global _LAST_ITEMS
     try:
         d = json.loads((ROOT / "queue.json").read_text("utf-8"))
-        _LAST_ITEMS = [dict({k: i.get(k) for k in ("id", "key", "type", "kind", "title", "status", "publishAt", "error", "url", "pct", "stage", "est", "ia", "ia_title", "yt_url", "aviso")},
-                            hasfile=bool(i.get("id") and (MEDIA / f"{i['id']}_final.mp4").exists())) for i in d.get("items", [])]
+        _LAST_ITEMS = [dict({k: i.get(k) for k in ("id", "key", "type", "kind", "title", "status", "publishAt", "error", "url", "pct", "stage", "est", "ia", "ia_title", "yt_url", "aviso", "part", "parts", "reanudar", "reintentos")},
+                            fid=_fid(i), hasfile=bool(i.get("id") and (MEDIA / f"{_fid(i)}_final.mp4").exists())) for i in d.get("items", [])]
     except Exception:
         pass
     return _LAST_ITEMS
@@ -114,7 +115,15 @@ def merge_queue(data, reedit=False):
         try: old = {i["key"]: i for i in json.loads(qf.read_text("utf-8")).get("items", [])}
         except Exception: pass
     keep = ("scheduled", "published") if reedit else ("ready", "scheduled", "published")
-    items = [old[i["key"]] if i.get("key") in old and old[i["key"]].get("status") in keep else i for i in data["items"]]
+    items = []
+    for i in data["items"]:
+        partes = [old[k] for k in old if k.startswith(i.get("key", "\0") + "#")]        # Shorts sacados del mismo video largo
+        if partes and any(p.get("status") in keep for p in partes):
+            for p in sorted(partes, key=lambda x: x.get("part", 0)):
+                if p.get("status") in keep: items.append(p)
+                else:                                                                       # esa parte se vuelve a procesar desde cero
+                    items.append(dict({k: p[k] for k in ("type", "id", "key", "kind", "url", "part", "parts", "split_start", "split_base") if k in p}, status="pending"))
+        else: items.append(old[i["key"]] if i.get("key") in old and old[i["key"]].get("status") in keep else i)
     write_queue({"config": data.get("config", {}), "items": items})
 
 def run_job(extra):
@@ -149,7 +158,7 @@ class H(BaseHTTPRequestHandler):
         o = self.headers.get("Origin", ""); return bool(o) and o not in ALLOWED
     def _media(self):
         import re as _re
-        m = _re.fullmatch(r"/media/([\w-]{11})_final\.mp4", self.path.split("?")[0])
+        m = _re.fullmatch(r"/media/([\w-]{11}(?:_p\d{1,2})?)_final\.mp4", self.path.split("?")[0])
         ref = self.headers.get("Referer", "")
         if not m or (ref and not any(ref.startswith(o) for o in ALLOWED)): return self._send({"ok": False}, 404)
         f = MEDIA / f"{m.group(1)}_final.mp4"
@@ -227,7 +236,9 @@ class H(BaseHTTPRequestHandler):
             d = read_queue(); key = data.get("key") or "ALL"
             ready = [i for i in (d or {}).get("items", []) if i.get("status") == "ready" and (key == "ALL" or i.get("key") == key)]
             if not ready: return self._send({"ok": False, "message": "No hay videos editados listos para subir."})
-            if data.get("config"): d["config"] = data["config"]; write_queue(d)
+            if data.get("config"): d["config"] = data["config"]
+            for i in ready: i.pop("reintentos", None); i.pop("reanudar_en", None)
+            write_queue(d)
             if not launch_chrome(): return self._send({"ok": False, "message": "No pude abrir Chrome/Edge para subir."})
             try: (ROOT / "cancel.json").unlink()
             except Exception: pass
@@ -236,7 +247,27 @@ class H(BaseHTTPRequestHandler):
             return self._send({"ok": True, "message": f"Subiendo {len(ready)} video(s) " + ("ahora." if mode == "now" else "con programación.")})
         self._send({"ok": False}, 404)
 
+MAX_AUTO = 8
+def vigilante():
+    """Cada minuto: si una subida quedó cortada (marcada 'reanudar') y no hay nada en marcha, la retoma sola, sin que toques nada."""
+    while True:
+        time.sleep(60)
+        try:
+            d = read_queue()
+            if not d or state["running"] or not d.get("config", {}).get("auto_reanudar", True): continue
+            ahora = time.time()
+            pend = [i for i in d.get("items", []) if i.get("reanudar") and i.get("status") == "ready"
+                    and i.get("reintentos", 0) <= MAX_AUTO and ahora >= i.get("reanudar_en", 0) and i.get("id") and (MEDIA / f"{_fid(i)}_final.mp4").exists()]
+            if not pend: continue
+            if not launch_chrome(): log("Vigilante: no pude abrir Chrome para reanudar; lo intento de nuevo en un rato."); continue
+            try: (ROOT / "cancel.json").unlink()
+            except Exception: pass
+            log(f"Vigilante: reanudando {len(pend)} subida(s) cortada(s) automáticamente.")
+            threading.Thread(target=run_job, args=(["--reanudar"],), daemon=True).start()
+        except Exception as e: log(f"Vigilante: {e}")
+
 def serve():
+    threading.Thread(target=vigilante, daemon=True).start()
     ThreadingHTTPServer(("127.0.0.1", 8765), H).serve_forever()
 
 if __name__ == "__main__":

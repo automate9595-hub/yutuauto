@@ -1,5 +1,5 @@
 """Control de Chrome por DevTools (CDP) en Python puro: sin Playwright ni Node.js (funciona en Windows 8.1)."""
-import base64, json, os, re, socket, struct, time, urllib.parse, urllib.request
+import base64, json, os, re, select, socket, struct, time, urllib.parse, urllib.request
 
 class WS:
     def __init__(self, url):
@@ -55,7 +55,7 @@ HELPERS = ("window.__D=window.__D||function(s,r){r=r||document;var x=r.querySele
 
 class Tab:
     def __init__(self, info, propia=True):
-        self.id = info["id"]; self.propia = propia; self.n = 0
+        self.id = info["id"]; self.propia = propia; self.n = 0; self.eventos = []
         self.ws = WS(info["webSocketDebuggerUrl"])
         self.call("Page.enable"); self.call("Page.bringToFront")
 
@@ -88,6 +88,13 @@ class Tab:
             except Exception: pass
             raise RuntimeError("No pude controlar la pestaña de Chrome por DevTools: " + str(e)[:100])
 
+    def _atender(self, msg):
+        """Eventos de Chrome: acepta '¿Salir del sitio?' y guarda el resto (p. ej. Page.fileChooserOpened)."""
+        if msg.get("method") == "Page.javascriptDialogOpening":
+            self.n += 1; self.ws.send(json.dumps({"id": self.n, "method": "Page.handleJavaScriptDialog", "params": {"accept": True}}))
+        if msg.get("method"):
+            self.eventos.append(msg); del self.eventos[:-200]
+
     def call(self, method, params=None, timeout=30):
         self.n += 1; i = self.n
         self.ws.send(json.dumps({"id": i, "method": method, "params": params or {}}))
@@ -96,11 +103,59 @@ class Tab:
             left = end - time.time()
             if left <= 0: raise TimeoutError(method + " tardó demasiado")
             msg = json.loads(self.ws.recv(left))
-            if msg.get("method") == "Page.javascriptDialogOpening":        # "¿Salir del sitio?": aceptar
-                self.n += 1; self.ws.send(json.dumps({"id": self.n, "method": "Page.handleJavaScriptDialog", "params": {"accept": True}}))
+            self._atender(msg)
             if msg.get("id") == i:
                 if "error" in msg: raise RuntimeError(f"{method}: {msg['error'].get('message')}")
                 return msg.get("result", {})
+
+    def esperar_evento(self, metodo, timeout=10):
+        """Espera un evento de Chrome (p. ej. 'Page.fileChooserOpened'). Devuelve sus parámetros o None."""
+        end = time.time() + timeout
+        while True:
+            for k, e in enumerate(self.eventos):
+                if e.get("method") == metodo: return self.eventos.pop(k).get("params", {})
+            left = end - time.time()
+            if left <= 0: return None
+            if not self.ws.buf:
+                r, _, _ = select.select([self.ws.s], [], [], min(left, 1.0))
+                if not r: continue
+            self._atender(json.loads(self.ws.recv(10)))
+
+    def subir_con_selector(self, x, y, rutas, espera=8):
+        """Hace clic real en (x, y) -> Studio abre el selector de archivos de Windows -> se intercepta y se le entrega
+        la ruta directamente, sin que aparezca la ventana (así 'Reanudar subida' funciona sola)."""
+        self.eventos.clear()
+        try: self.call("DOM.enable")
+        except Exception: pass
+        self.call("Page.setInterceptFileChooserDialog", {"enabled": True})
+        try:
+            for t in ("mousePressed", "mouseReleased"):
+                self.call("Input.dispatchMouseEvent", {"type": t, "x": x, "y": y, "button": "left", "clickCount": 1})
+            ev = self.esperar_evento("Page.fileChooserOpened", espera)
+            files = [os.path.abspath(r) for r in rutas]
+            if ev and ev.get("backendNodeId"):
+                self.call("DOM.setFileInputFiles", {"files": files, "backendNodeId": ev["backendNodeId"]}); return True
+            if self.existe("input[type=file]"):                      # Studio a veces deja un <input type=file> en la página
+                self.archivos("input[type=file]", rutas); return True
+            return False
+        finally:
+            try: self.call("Page.setInterceptFileChooserDialog", {"enabled": False})
+            except Exception: pass
+
+    def reconectar(self, port=9222):
+        """Vuelve a conectarse a la pestaña (o a otra de Studio) si Chrome o la pestaña se cerraron/colgaron."""
+        try: self.ws.close()
+        except Exception: pass
+        info = None
+        for t in Tab.listar(port):
+            if t.get("type") == "page" and t.get("id") == self.id and t.get("webSocketDebuggerUrl"): info = t; break
+        if not info:
+            for t in Tab.listar(port):
+                if t.get("type") == "page" and t.get("url", "").startswith("https://studio.youtube.com") and t.get("webSocketDebuggerUrl"):
+                    info = t; self.propia = False; break
+        if not info: raise ConnectionError("No encuentro ninguna pestaña de YouTube Studio en el Chrome del worker")
+        self.id = info["id"]; self.eventos = []; self.ws = WS(info["webSocketDebuggerUrl"])
+        self.call("Page.enable"); self.call("Page.bringToFront")
 
     def eval(self, js, objeto=False, espera=False):
         r = self.call("Runtime.evaluate", {"expression": HELPERS + js, "returnByValue": not objeto, "awaitPromise": espera})

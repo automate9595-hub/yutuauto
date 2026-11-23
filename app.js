@@ -6,7 +6,8 @@ sub:true,lang:"es-latino",stt:"auto",model:"small",sub_pos:"bottom",sub_size:"m"
 cut_mode:"auto",cut_start:0,short_len:58,frame:"crop",vid_trim:false,vid_start:0,vid_len:0,
 fx_list:[],fx_mode:"seq",fx_dur:3,fx_gap:0,fx_blend:0.6,fx_power:1,fx_start:0,fx_repeat:true,
 vivid:false,vignette:false,fade:false,loudnorm:false,
-ia_mode:"alternar",ia_cut:true,ia_fx:true,ia_sub:true,ia_text:true};
+ia_mode:"alternar",ia_cut:true,ia_fx:true,ia_sub:true,ia_text:true,
+split_n:1,split_gap:6,split_mode:"auto",auto_reanudar:true};
 let saved=load(C,null);if(saved===null){saved=load(C_OLD,{});delete saved.publish}   /* migra la config anterior; la publicación vuelve a "inmediata" */
 let cfg=Object.assign({},DEF,saved);if(String(cfg.ia_mode).includes("grok"))cfg.ia_mode=String(cfg.ia_mode).replace("grok","groq");
 const saveCfg=()=>{try{localStorage.setItem(C,JSON.stringify(cfg))}catch{}};
@@ -45,7 +46,8 @@ set(1,W.worker?(W.yt?"Worker y canal conectados":"Worker conectado · falta cone
 set(2,q.length?`${q.length} en cola · ${sh} Shorts · ${q.length-sh} videos`:"Pegá los links",q.length>0);
 set(3,cfg.sub?`${L.lang[cfg.lang]||cfg.lang} · ${L.stt[cfg.stt]||cfg.stt}`:"Sin subtítulos",true);
 $("g-voz").textContent=cfg.sub?(L.stt[cfg.stt]||""):"";$("g-asp").textContent=({bottom:"abajo",middle:"centro",top:"arriba"})[cfg.sub_pos]+" · "+({s:"pequeño",m:"mediano",l:"grande"})[cfg.sub_size];
-set(4,`Short ${cfg.short_len||58} s · ${({auto:"tramo automático",inicio:"desde el inicio",manual:"desde el seg. "+cfg.cut_start})[cfg.cut_mode]}${cfg.vid_trim?" · videos recortados":""}`,true);
+$("g-split").textContent=(+cfg.split_n||1)>1?cfg.split_n+" por video":"";
+set(4,`${(+cfg.split_n||1)>1?cfg.split_n+' Shorts por video (1 cada '+(cfg.split_gap||0)+' h) · ':''}Short ${cfg.short_len||58} s · ${({auto:"tramo automático",inicio:"desde el inicio",manual:"desde el seg. "+cfg.cut_start})[cfg.cut_mode]}${cfg.vid_trim?" · videos recortados":""}`,true);
 const ac=["vivid","vignette","fade","loudnorm"].filter(k=>cfg[k]).length;
 set(5,`${cfg.fx_list.length?cfg.fx_list.length+" efectos":"Sin efectos"}${ac?" · "+ac+" de acabado":""}`,true);
 const tareas=["ia_text","ia_cut","ia_sub","ia_fx"].filter(k=>cfg[k]).length;
@@ -53,16 +55,20 @@ set(6,cfg.ia_mode==="apagado"?"IA apagada":`IA ${L.ia[cfg.ia_mode]||cfg.ia_mode}
 set(7,cfg.publish==="now"?"Publicar de inmediato":`Programar · ${cfg.sn} Shorts y ${cfg.vn} videos por día`,true);
 $("sch-box").style.display=cfg.publish==="schedule"?"":"none"}
 
+const nOf=x=>Math.max(1,Math.min(30,+(x.n||cfg.split_n)||1));
 function render(){
 const sh=q.filter(x=>x.kind==="short"),vd=q.filter(x=>x.kind!=="short");
 $("s-total").textContent=q.length;$("s-short").textContent=sh.length;$("s-video").textContent=vd.length;
 $("qcount").textContent=q.length+(q.length===1?" elemento":" elementos");
-$("list").innerHTML=q.length?q.map(x=>`<div class="item"><div class="ic">${x.type==="playlist"?"▤":"▶"}</div><div><div class="url">${esc(x.url)}</div><div class="sub">${x.type==="playlist"?"Playlist (se expande al procesar)":"Video individual"}</div></div><div class="tog"><button class="${x.kind==="short"?"on":""}" data-k="${esc(x.key)}" data-v="short">Short</button><button class="${x.kind!=="short"?"on":""}" data-k="${esc(x.key)}" data-v="video">Video</button></div><button class="x" data-r="${esc(x.key)}" aria-label="Quitar">×</button></div>`).join(""):'<div class="empty"><b>Tu cola está vacía</b>Pegá links arriba para comenzar.</div>';
-const a=slots(Math.min(sh.length,8),cfg.sn,cfg.st).map(d=>[d,"Short"]),b=slots(Math.min(vd.length,8),cfg.vn,cfg.vt).map(d=>[d,"Video"]);
+$("list").innerHTML=q.length?q.map(x=>`<div class="item"><div class="ic">${x.type==="playlist"?"▤":"▶"}</div><div><div class="url">${esc(x.url)}</div><div class="sub">${x.type==="playlist"?"Playlist (se expande al procesar)":"Video individual"}</div></div>${x.kind==="short"&&x.type==="video"?`<label class="nn" title="Cuántos Shorts sacar de este video"><input type="number" min="1" max="30" value="${nOf(x)}" data-n="${esc(x.key)}" aria-label="Cantidad de Shorts"><span>×</span></label>`:""}<div class="tog"><button class="${x.kind==="short"?"on":""}" data-k="${esc(x.key)}" data-v="short">Short</button><button class="${x.kind!=="short"?"on":""}" data-k="${esc(x.key)}" data-v="video">Video</button></div><button class="x" data-r="${esc(x.key)}" aria-label="Quitar">×</button></div>`).join(""):'<div class="empty"><b>Tu cola está vacía</b>Pegá links arriba para comenzar.</div>';
+const base=slots(Math.min(sh.length,8),cfg.sn,cfg.st),a=[];
+sh.forEach((x,i)=>{const n=x.type==="video"?nOf(x):1,t0=base[i];if(!t0)return;for(let k=0;k<n&&a.length<14;k++)a.push([new Date(t0.getTime()+k*(+cfg.split_gap||0)*36e5),n>1?`Short ${k+1}/${n}`:"Short"])});
+const b=slots(Math.min(vd.length,8),cfg.vn,cfg.vt).map(d=>[d,"Video"]);
 const all=[...a,...b].sort((x,y)=>x[0]-y[0]);
 $("sched").innerHTML=all.length?all.map(([d,t])=>`<div class="sl"><span>${d.toLocaleDateString("es",{weekday:"short",day:"numeric",month:"short"})} · ${d.toLocaleTimeString("es",{hour:"2-digit",minute:"2-digit"})}</span><b class="tg ${t==="Video"?"v":""}">${t}</b></div>`).join(""):'<div class="empty">Agregá elementos a la cola para ver el calendario.</div>';
 sums()}
-$("list").onclick=e=>{const t=e.target;if(t.dataset.r){q=q.filter(x=>x.key!==t.dataset.r);save()}if(t.dataset.k){q.find(x=>x.key===t.dataset.k).kind=t.dataset.v;save()}};
+$("list").oninput=e=>{const t=e.target;if(t.dataset.n){const x=q.find(y=>y.key===t.dataset.n);if(x){x.n=Math.max(1,Math.min(30,+t.value||1));try{localStorage.setItem(K,JSON.stringify(q))}catch{}sums()}}};
+$("list").onclick=e=>{const t=e.target;if(t.dataset.n)return;if(t.dataset.r){q=q.filter(x=>x.key!==t.dataset.r);save()}if(t.dataset.k){q.find(x=>x.key===t.dataset.k).kind=t.dataset.v;save()}};
 $("add").onclick=()=>{const L=$("links").value.split(/\n|,|;/).map(s=>s.trim()).filter(Boolean),m=$("msg");
 if(!L.length){m.textContent="Pegá al menos un enlace.";m.className="msg err";return}
 let a=0,d=0,i=0;for(const l of L){const p=parse(l);if(!p){i++;continue}const key=p.type+":"+p.id;if(q.some(x=>x.key===key)){d++;continue}q.push({...p,key,status:"pending"});a++}
@@ -92,7 +98,7 @@ document.addEventListener("click",e=>{const b=e.target.closest(".btn");if(!b)ret
 function openWin(t,html){$("win-title").textContent=t;$("win-body").innerHTML=html;$("win").classList.add("open");$("win").setAttribute("aria-hidden","false")}
 function closeWin(){$("win").classList.remove("open");$("win").setAttribute("aria-hidden","true");const v=$("win-body").querySelector("video");if(v)v.pause()}
 $("win").onclick=e=>{if(e.target===$("win")||e.target.dataset.close!==undefined)closeWin()};addEventListener("keydown",e=>{if(e.key==="Escape")closeWin()});
-$("list").addEventListener("click",e=>{if(e.target.closest("button"))return;const it=e.target.closest(".item");if(!it)return;const x=q.find(y=>y.key===it.querySelector("[data-r]").dataset.r);if(!x)return;
+$("list").addEventListener("click",e=>{if(e.target.closest("button,label,input"))return;const it=e.target.closest(".item");if(!it)return;const x=q.find(y=>y.key===it.querySelector("[data-r]").dataset.r);if(!x)return;
 openWin(x.type==="playlist"?"Playlist":"Vista previa",(x.type==="video"?`<img src="https://i.ytimg.com/vi/${esc(x.id)}/hqdefault.jpg" alt="Miniatura" onerror="this.remove()">`:"")+`<p><b>Salida:</b> ${x.kind==="short"?"Short vertical 9:16":"Video completo"}</p><p class="sub" style="word-break:break-all">${esc(x.url)}</p>`)});
 $("open-guide").onclick=()=>openWin("Guía de activación",`<ol><li>Ejecutá <code>worker\\2-INSTALAR-Y-EJECUTAR.bat</code>; queda en segundo plano con un icono junto al wifi.</li><li>Tocá <b>Conectar con mi canal de YouTube</b> e iniciá sesión en el Chrome que se abre (solo una vez).</li><li>Recorré los pasos, y en el último tocá <b>Procesar y publicar todo</b>.</li></ol><p class="sub">Esa sesión de Chrome es el permiso para publicar en tu canal.</p>`);
 
@@ -137,10 +143,10 @@ st==="ready"?`<button class="btn pri sm" data-act="now" data-k="${k}">Subir ahor
 BUSY.includes(st)?`<button class="btn ghost sm danger" data-act="cancel" data-k="${k}">Cancelar</button>`:"",
 x.error?`<button class="btn ghost sm" data-act="diag" data-k="${k}">Ver diagnóstico</button>`:""].join("");
 const link=x.yt_url?`<a class="yl" href="${esc(x.yt_url)}" target="_blank" rel="noopener">Ver en YouTube ↗</a>`:"";
-return `<div class="pc">${x.type==="video"?`<img loading="lazy" src="https://i.ytimg.com/vi/${esc(x.id||"")}/mqdefault.jpg" alt="" onerror="this.style.visibility='hidden'">`:""}<div><b>${esc(x.ia_title||x.title||x.url||"")}</b><span class="st ${esc(st)}">${ST[st]||esc(st)}</span><small>${x.kind==="short"?"Short":"Video"}${x.publishAt?" · "+new Date(x.publishAt).toLocaleString("es",{dateStyle:"medium",timeStyle:"short"}):""}</small>
+return `<div class="pc">${x.type==="video"?`<img loading="lazy" src="https://i.ytimg.com/vi/${esc(x.id||"")}/mqdefault.jpg" alt="" onerror="this.style.visibility='hidden'">`:""}<div><b>${esc(x.ia_title||x.title||x.url||"")}</b><span class="st ${esc(st)}">${ST[st]||esc(st)}</span><small>${x.kind==="short"?"Short":"Video"}${x.parts>1?" · Parte "+x.part+"/"+x.parts:""}${x.reanudar&&x.status==="ready"?" · se reanuda sola":""}${x.publishAt?" · "+new Date(x.publishAt).toLocaleString("es",{dateStyle:"medium",timeStyle:"short"}):""}</small>
 <div style="height:10px;border-radius:99px;background:#1a2538;overflow:hidden;margin:10px 0 4px"><span style="display:block;height:100%;width:${pct}%;min-width:${pct?4:0}px;border-radius:99px;background:${["error","cancelled"].includes(st)?"#8a5a66":BUSY.includes(st)?"#5b86ff":"#45c79b"}"></span></div><small class="pgt">${label}</small>${x.ia?`<small class="pgt">Ayuda IA: ${esc(x.ia)}</small>`:""}${link}${x.aviso?`<small class="err">⚠ ${esc(x.aviso)}</small>`:""}${x.error?`<small class="err">${esc(x.error)}</small>`:""}${acts?`<div class="acts">${acts}</div>`:""}</div></div>`}).join("")}
 $("pub").onclick=async e=>{const b=e.target.closest("[data-act]");if(!b)return;const k=b.dataset.k,a=b.dataset.act;
-if(a==="prev"){const id=k.split(":")[1];openWin("Vista previa del video editado",`<video controls autoplay playsinline style="width:100%;max-height:70vh;border-radius:10px;background:#000" src="${API}/media/${encodeURIComponent(id)}_final.mp4"></video><p class="sub">Es el archivo ya editado, tal como se va a subir.</p>`);return}
+if(a==="prev"){const it=W.items.find(y=>y.key===k)||{},id=it.fid||k.split(":")[1].split("#")[0];openWin("Vista previa del video editado",`<video controls autoplay playsinline style="width:100%;max-height:70vh;border-radius:10px;background:#000" src="${API}/media/${encodeURIComponent(id)}_final.mp4"></video><p class="sub">Es el archivo ya editado, tal como se va a subir.</p>`);return}
 if(a==="diag"){verDiag();return}
 if(a==="cancel"){const r=await call("/cancel",{key:k});note(r?r.message:"No encuentro el worker.",!r);poll();return}
 const r=await call("/upload",{key:k,mode:a==="now"?"now":"schedule",config:cfg});note(r?r.message:"No encuentro el worker.",!r||!r.ok);poll()};

@@ -1,5 +1,5 @@
 """Yutu worker: descarga -> recorte -> efectos -> subtitulos -> subida a YouTube Studio (sin Google Cloud)."""
-import json, math, os, re, shutil, subprocess, sys, time, pathlib, datetime as dt
+import json, math, os, re, shutil, subprocess, sys, time, pathlib, urllib.request, datetime as dt
 import efectos, ia, voz, cdp
 ROOT = pathlib.Path(__file__).parent
 MEDIA = ROOT / "media"; MEDIA.mkdir(exist_ok=True)
@@ -7,6 +7,15 @@ QF = ROOT / "queue.json"; CF = ROOT / "cancel.json"
 NO_UPLOAD = "--sin-subir" in sys.argv
 
 class Cancelled(Exception): pass
+class SubidaInterrumpida(Exception): pass
+
+MAX_INTENTOS = 5      # reintentos dentro de una misma subida (reanuda sola)
+MAX_AUTO = 8          # reintentos automáticos posteriores (los lanza el vigilante del servidor)
+STALL_S = 420         # si el % no avanza en 7 min, se considera cortada
+
+def fid(it):
+    """Nombre base de los archivos del item: el id del video, más _pN si es la parte N de un video largo."""
+    return it["id"] + (f"_p{it['part']}" if (it.get("parts") or 1) > 1 else "")
 
 D = None            # cola en memoria (para guardar el progreso)
 PLAN = {}           # peso de cada etapa en el porcentaje total
@@ -119,7 +128,7 @@ def subtitles(it, src, start, length, cfg, short):
         if prov:
             caps = [(a, b, mejor[k]) for k, (a, b, _) in enumerate(caps)]; it["_sub_ia"] = prov
             print(f"  [IA {prov}] Subtitulos corregidos.")
-    srt = MEDIA / (src.stem + ".srt")
+    srt = MEDIA / f"{fid(it)}.srt"
     with open(srt, "w", encoding="utf-8") as f:
         for i, (a, b, t) in enumerate(caps, 1):
             f.write(f"{i}\n{srt_time(a)} --> {srt_time(max(b, a + 0.3))}\n{t.upper() if cfg.get('sub_caps') else t}\n\n")
@@ -142,7 +151,8 @@ def window(it, cfg, dur, ai_start=None):
     if it["kind"] == "short":
         L = min(f("short_len", 58), 60, dur)
         mode = cfg.get("cut_mode", "auto")
-        if mode == "inicio" or dur <= L: start = 0
+        if it.get("split_start") is not None: start = min(max(float(it["split_start"]), 0), max(dur - L, 0))
+        elif mode == "inicio" or dur <= L: start = 0
         elif mode == "manual": start = min(f("cut_start"), dur - L)
         elif ai_start is not None: start = min(max(ai_start, 0), dur - L)
         else: start = min(dur * 0.1, dur - L)
@@ -200,6 +210,48 @@ def encode(it, src, start, L, vf, af, final):
     if p.wait() != 0: raise subprocess.CalledProcessError(p.returncode, "ffmpeg", output=" ".join(errs[-3:]))
     set_prog(it, "edit", 1.0, True)
 
+def reparto_parejo(dur, L, n):
+    """n inicios repartidos parejo a lo largo del video, cada tramo centrado en su porción (sin solaparse si cabe)."""
+    slot = dur / n
+    return [max(0.0, min(dur - L, i * slot + max(0.0, (slot - L) / 2))) for i in range(n)]
+
+def planificar_partes(it, cfg, src, dur, L):
+    """Decide de una vez el inicio de TODOS los Shorts que salen de este video largo (IA o reparto parejo)."""
+    hermanos = sorted([x for x in D["items"] if x.get("id") == it["id"] and x.get("parts") == it.get("parts") and x.get("kind") == "short"],
+                      key=lambda x: x.get("part", 0)) if D else [it]
+    n = len(hermanos); starts = None; prov = ""
+    if cfg.get("split_mode", "auto") == "auto" and ia_activa(cfg) and dur <= 3600 and not it.get("_noia"):
+        print(f"  [IA] Buscando los {n} mejores momentos para {n} Shorts...")
+        try:
+            segs = transcribe_full(it, src, cfg, dur)
+            r = ia.momentos(cfg.get("ia_mode", "alternar"), it.get("title", ""), segs, dur, L, n) if segs else None
+            if r: starts, prov = r["inicios"], r["prov"]; print(f"  [IA {prov}] Momentos elegidos: " + ", ".join(f"{x:.0f}s" for x in starts) + ". " + r["motivo"])
+        except Cancelled: raise
+        except Exception as e: print("  [IA] No se pudo analizar:", str(e)[:150])
+        set_prog(it, "ia", 1.0, True)
+    if not starts or len(starts) < n:
+        starts = reparto_parejo(dur, L, n); print(f"  Reparto parejo de {n} Shorts: " + ", ".join(f"{x:.0f}s" for x in starts))
+    for x, st in zip(hermanos, starts): x["split_start"] = round(st, 1)
+    save(D)
+
+def split_items(d):
+    """Un Short con 'n' > 1 (o split_n de la config) se convierte en n items independientes: video:ID#1 ... video:ID#n."""
+    cfg = d.get("config", {}); out = []
+    for it in d["items"]:
+        n = min(int(it.get("n") or cfg.get("split_n") or 1), 30)
+        if it.get("kind") != "short" or it.get("type") != "video" or it.get("parts") or "#" in it["key"] or it.get("status") != "pending" or n <= 1:
+            out.append(it); continue
+        L = min(float(cfg.get("short_len") or 58), 60)
+        try: dur = json.loads(ytdlp("-j", "--no-playlist", it["url"], capture_output=True, text=True).stdout).get("duration")
+        except Exception as e: dur = None; print("  No pude leer la duración para dividir:", str(e)[:100])
+        if dur and int(dur // L) < n:
+            n = max(1, int(dur // L)); print(f"  El video dura {dur:.0f}s: solo caben {n} Shorts de {L:.0f}s sin repetir partes.")
+        if n <= 1: out.append(it); continue
+        for p in range(1, n + 1):
+            c = dict(it); c.update(key=f"{it['key']}#{p}", part=p, parts=n, status="pending"); out.append(c)
+        print(f"  {it['url']} -> {n} Shorts (uno cada {cfg.get('split_gap') or 0} h)")
+    d["items"] = out
+
 def process(it, cfg):
     if not FFMPEG: raise RuntimeError("No encuentro FFmpeg. Cierra el worker y ejecuta 2-INSTALAR-Y-EJECUTAR.bat de nuevo.")
     vid = it["id"]; src = MEDIA / f"{vid}.mp4"; short = it["kind"] == "short"
@@ -212,9 +264,11 @@ def process(it, cfg):
         download(it, src)
     else: set_prog(it, "dl", 1.0, True)
     check_cancel(it)
+    if short and it.get("parts") and it.get("split_start") is None:
+        planificar_partes(it, cfg, src, dur, min(float(cfg.get("short_len") or 58), 60, dur))
     start, L = window(it, cfg, dur)
     modo, ayuda = cfg.get("ia_mode", "alternar"), []
-    if ia_activa(cfg) and cfg.get("ia_cut") and dur > L + 2 and dur <= 1800 and not it.get("_noia"):
+    if ia_activa(cfg) and cfg.get("ia_cut") and dur > L + 2 and dur <= 1800 and not it.get("_noia") and not it.get("parts"):
         elegible = (short and cfg.get("cut_mode", "auto") == "auto") or (not short and cfg.get("vid_trim") and float(cfg.get("vid_len") or 0) > 0 and not float(cfg.get("vid_start") or 0))
         if elegible:
             print("  [IA] Buscando el mejor tramo...")
@@ -245,7 +299,7 @@ def process(it, cfg):
             ecfg = dict(cfg, fx_list=r["fx_list"], fx_mode=r["fx_mode"], fx_dur=r["fx_dur"], fx_power=r["fx_power"])
             ayuda.append("efectos " + r["prov"]); print(f"  [IA {r['prov']}] Efectos: {', '.join(r['fx_list'])} ({r['fx_mode']}). {r['motivo']}")
         else: print("  [IA] Sin sugerencia de efectos: uso los tuyos.")
-    final = MEDIA / f"{vid}_final.mp4"
+    final = MEDIA / f"{fid(it)}_final.mp4"
     print("  [3/3] Editando video...")
     vf, af = build_vf(ecfg, short, L, srt), build_af(ecfg, L)
     if not short and not vf.replace("setsar=1", "").strip(",") and not af and start == 0 and L >= dur - 1:
@@ -290,19 +344,7 @@ def write_plan(items):
 STEP = [""]
 def paso(msg): STEP[0] = msg; print("  Subida:", msg)
 
-def up_progress(tab, it, t0, size_mb):
-    """Porcentaje de subida: lo lee de Studio si puede; si no, lo estima (marcado con ~)."""
-    frac = None
-    try:
-        txt = tab.texto("ytcp-video-upload-progress")
-        m = re.search(r"(\d{1,3})\s*%", txt)
-        if m: frac = min(int(m.group(1)), 100) / 100; it["est"] = False
-        elif re.search(r"upload complete|checks complete|finished|completad|finaliz|terminad", txt, re.I): frac = 1.0; it["est"] = False
-    except Exception: pass
-    if frac is None:
-        tau = max(8.0, size_mb / 2.0)               # ~2 MB/s
-        frac = min(0.95, 1 - math.exp(-(time.time() - t0) / tau)); it["est"] = True
-    set_prog(it, "up", frac)
+# (up_progress está más abajo, junto con la subida con reanudado automático)
 
 MESES_ES = ["ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sept", "oct", "nov", "dic"]
 MESES_EN = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
@@ -509,45 +551,142 @@ def textos_para_subir(it, cfg):
     if not t and cfg and ia_activa(cfg) and cfg.get("ia_text", True):
         try:
             paso("pidiendo título y descripción a la IA")
-            srt = MEDIA / f"{it.get('id', '')}.srt"
+            srt = MEDIA / f"{fid(it) if it.get('id') else ''}.srt"
             r = ia.textos(cfg.get("ia_mode", "alternar"), it.get("title", ""), srt_text(srt if srt.exists() else None), it.get("kind", "video"))
             if r: t, desc = r["titulo"].strip(), r["descripcion"].strip(); it["ia_title"], it["ia_desc"] = t, desc; print(f"  [IA {r['prov']}] Título: {t}")
         except Exception as e: print("  [IA] No pude generar el título:", str(e)[:120])
     return (t[:100] if t else None), desc
 
-def studio_upload_one(tab, cid, it, cfg=None):
-    titulo, desc = textos_para_subir(it, cfg)
-    cuerpo = (desc + "\n\n" if desc else "") + ("#Shorts" if it["kind"] == "short" and "#shorts" not in desc.lower() else "")
-    cuerpo = cuerpo.strip()
-    now_mode = not it.get("publishAt")
-    when = None if now_mode else local(it["publishAt"])
-    size_mb = os.path.getsize(it["file"]) / 1048576
-    chk = lambda: check_cancel(it)
-    it["status"] = "uploading"; it.pop("error", None); it.pop("yt_url", None); set_prog(it, "up", 0.0, True)
-    abrir_dialogo(tab, cid, chk)
-    paso("enviando el archivo de video")
-    tab.archivos("input[type=file]", [it["file"]]); t0 = time.time()
-    paso("esperando el formulario de detalles")
-    end = time.time() + 120
-    while tab.cuantos("#textbox") < 2:
+# ======================= subida con reanudado automático =======================
+RE_CORTE = re.compile(r"interrumpid|interrupted|subida\s+(?:cancelada|fallida)|upload\s+(?:failed|cancel)|no se pudo (?:subir|cargar)|couldn.?t upload|reanudar subida|resume upload", re.I)
+SEL_PROGRESO = "ytcp-video-upload-progress, ytcp-multi-progress-monitor"
+_PROG = {"pct": None, "t": 0.0}
+
+def texto_progreso(tab):
+    """Texto de los paneles de progreso de Studio (el del cuadro de subida y el flotante 'Subiendo 1 de 1')."""
+    try:
+        t = tab.eval("window.__A(%s).map(function(e){return e.innerText||''}).join(' | ')" % json.dumps(SEL_PROGRESO)) or ""
+        if t.strip(" |\n"): return t
+        return tab.eval("(document.body.innerText||'').split('\\n').filter(function(l){return /subiendo|% subido|uploading|subida|upload/i.test(l)}).slice(0,8).join(' | ')") or ""
+    except Exception: return ""
+
+def vigilar_subida(tab, real):
+    """Lanza SubidaInterrumpida si Studio avisa que se cortó o si el porcentaje lleva demasiado sin avanzar."""
+    m = RE_CORTE.search(texto_progreso(tab))
+    if m: raise SubidaInterrumpida("Studio avisó: " + m.group(0))
+    if real is not None and real < 100:
+        if _PROG["pct"] != real: _PROG["pct"], _PROG["t"] = real, time.time()
+        elif time.time() - _PROG["t"] > STALL_S: raise SubidaInterrumpida(f"la subida no avanza hace {STALL_S // 60} min (quedó en {real} %)")
+
+def up_progress(tab, it, t0, size_mb):
+    """Porcentaje de subida: lo lee de Studio si puede; si no, lo estima (marcado con ~). Si la subida se corta, avisa."""
+    frac = real = None
+    try:
+        txt = texto_progreso(tab)
+        m = re.search(r"(\d{1,3})\s*%", txt)
+        if m: real = min(int(m.group(1)), 100); frac = real / 100; it["est"] = False
+        elif re.search(r"upload complete|checks complete|finished|completad|finaliz|terminad", txt, re.I): frac = 1.0; it["est"] = False
+    except Exception: pass
+    vigilar_subida(tab, real)
+    if frac is None:
+        tau = max(8.0, size_mb / 2.0)               # ~2 MB/s
+        frac = min(0.95, 1 - math.exp(-(time.time() - t0) / tau)); it["est"] = True
+    set_prog(it, "up", frac)
+
+def hay_internet():
+    try: urllib.request.urlopen("https://www.youtube.com/generate_204", timeout=6).read(); return True
+    except urllib.error.HTTPError: return True
+    except Exception: return False
+
+def esperar_internet(chk, maxs=900):
+    if hay_internet(): return True
+    paso("sin internet: espero a que vuelva"); fin = time.time() + maxs
+    while time.time() < fin:
         chk()
-        if time.time() > end: raise RuntimeError("Studio no mostró el formulario de título y descripción")
+        if hay_internet(): print("  Internet volvió."); time.sleep(3); return True
+        time.sleep(5)
+    return False
+
+def espera(seg, chk):
+    for _ in range(int(seg)): chk(); time.sleep(1)
+
+def asegurar_tab(tab, chk):
+    """Si Chrome o la pestaña se cerraron/colgaron, se reconecta (o reabre Chrome con tu sesión)."""
+    try: tab.url(); return
+    except Exception: pass
+    for _ in range(6):
+        chk()
+        try: tab.reconectar(); tab.url(); return
+        except Exception: pass
+        try:
+            import servidor; servidor.launch_chrome()
+        except Exception: pass
+        time.sleep(5)
+    raise RuntimeError("Chrome no responde: no pude reconectar con la pestaña de Studio")
+
+JS_FILAS_CORTADAS = r"""(function(){var o=[];window.__A("ytcp-video-row").forEach(function(r){var t=r.innerText||'';
+if(/interrumpid|interrupted|reanudar subida|resume upload/i.test(t)){var a=window.__D("a[href*='/video/']",r);
+o.push({t:t.slice(0,700),vid:a?((a.href.match(/\/video\/([\w-]{11})/)||[])[1]||''):''})}});return o})()"""
+
+JS_CLIC_REANUDAR = r"""(function(nombre){var rows=window.__A("ytcp-video-row"),row=null,n=(nombre||'').toLowerCase();
+for(var i=0;i<rows.length&&!row;i++){if((rows[i].innerText||'').toLowerCase().indexOf(n)>=0)row=rows[i]}
+for(var k=0;k<rows.length&&!row;k++){if(/reanudar subida|resume upload/i.test(rows[k].innerText||''))row=rows[k]}
+if(!row)return null;var a=window.__A("ytcp-button,button,tp-yt-paper-button,a,[role=button],span,div",row),best=null;
+for(var j=0;j<a.length;j++){var e=a[j],t=(e.innerText||'').trim();if(!/^(reanudar subida|resume upload)$/i.test(t))continue;
+var r=e.getBoundingClientRect();if(r.width<=0||r.height<=0)continue;var s=/^(ytcp-button|button|tp-yt-paper-button|a)$/i.test(e.tagName)?0:1;if(!best||s<best.s)best={s:s,e:e}}
+if(!best)return null;best.e.scrollIntoView({block:'center'});var q=best.e.getBoundingClientRect();return {x:q.left+q.width/2,y:q.top+q.height/2}})(%s)"""
+
+def filas_cortadas(tab, espera_s=25, chk=None):
+    """Filas de la lista de contenido que dicen 'La subida se ha interrumpido' (con su archivo y el id del borrador)."""
+    fin = time.time() + espera_s
+    while time.time() < fin:
+        if chk: chk()
+        try:
+            if tab.cuantos("ytcp-video-row") > 0: time.sleep(1.5); return tab.eval(JS_FILAS_CORTADAS) or []
+        except Exception: pass
         time.sleep(1)
-    time.sleep(1.5); up_progress(tab, it, t0, size_mb)
-    if titulo:
-        paso("escribiendo el título (IA)")
-        tab.escribir("#textbox", titulo, 0); time.sleep(0.5)
-    else:
-        paso("sin título de IA: dejo el nombre del archivo")
-    paso("escribiendo la descripción")
-    tab.escribir("#textbox", cuerpo, 1); time.sleep(0.5)
-    paso("marcando 'no es para niños'")
-    if not marcar_no_ninos(tab, chk):
-        print("  Aviso: no encontré la opción 'No es para niños'; sigo y dejo diagnóstico por si Studio la pide.")
-        tab.captura(ROOT / "aviso-ninos.png"); tab.diagnostico(ROOT / "diagnostico-ninos.txt", "No encontré la opcion de 'para niños'")
-    time.sleep(0.6)
-    # Siguiente hasta llegar a Visibilidad (Detalles -> Elementos del video -> Comprobaciones -> Visibilidad)
-    avanzar_hasta_visibilidad(tab, it, t0, size_mb, chk)
+    return []
+
+def nombre_en_fila(txt):
+    m = re.search(r"(?:selecciona|select)\s+(\S+?\.\w{2,4})(?=\s|\.|$)", txt, re.I)
+    return m.group(1).lower() if m else None
+
+def buscar_cortada(tab, cid, it, chk, esperar=25):
+    """Va a la lista de Studio y devuelve la fila de subida interrumpida que corresponde a este archivo (o None)."""
+    nombre = pathlib.Path(it["file"]).name.lower()
+    for ruta in ("upload", "short"):
+        tab.ir(f"https://studio.youtube.com/channel/{cid}/videos/{ruta}")
+        for f in filas_cortadas(tab, esperar, chk):
+            if nombre_en_fila(f["t"]) == nombre or nombre in f["t"].lower(): return f
+    return None
+
+def revisar_cortadas(tab, cid, pending, chk):
+    """Antes de subir nada: ¿quedó alguna subida cortada de estos mismos archivos? (por ejemplo, de una corrida anterior)."""
+    nombres = {pathlib.Path(i["file"]).name.lower() for i in pending if i.get("file")}; hallados = set()
+    try:
+        paso("revisando si quedó alguna subida cortada en Studio")
+        for ruta, esp in (("upload", 25), ("short", 12)):
+            tab.ir(f"https://studio.youtube.com/channel/{cid}/videos/{ruta}")
+            for f in filas_cortadas(tab, esp, chk):
+                n = nombre_en_fila(f["t"])
+                if n in nombres: hallados.add(n)
+                else:
+                    for x in nombres:
+                        if x in f["t"].lower(): hallados.add(x)
+    except Cancelled: raise
+    except Exception as e: print("  No pude revisar subidas cortadas:", str(e)[:100])
+    if hallados: print("  Subidas cortadas encontradas (las reanudo solas):", ", ".join(sorted(hallados)))
+    return hallados
+
+def capturar_id(tab, it):
+    if it.get("_draft"): return
+    try:
+        l = tab.eval("(function(){var a=window.__A(\"a[href*='youtu.be/'],a[href*='youtube.com/shorts/']\");for(var i=0;i<a.length;i++){var r=a[i].getBoundingClientRect();if(r.width>0)return a[i].href}return ''})()")
+        v = id_de_url(l)
+        if v: it["_draft"] = v
+    except Exception: pass
+
+def fijar_visibilidad(tab, now_mode, when, chk):
     if now_mode:
         paso("eligiendo Público (publicar ahora)")
         if not elegir_publico(tab): raise RuntimeError("No encontré la opción 'Público' en la pantalla de Visibilidad")
@@ -557,14 +696,44 @@ def studio_upload_one(tab, cid, it, cfg=None):
         tab.clic_visible("#second-container-expand-button") or tab.clic("#second-container-expand-button", 0, 20); time.sleep(1)
         tab.escribir("ytcp-date-picker input", fmt_fecha(campo_valor(tab, "ytcp-date-picker input"), when)); tab.tecla("Enter", 13); time.sleep(0.6)
         tab.escribir("#time-of-day-container input", fmt_hora(campo_valor(tab, "#time-of-day-container input"), when)); tab.tecla("Enter", 13); time.sleep(0.6)
+
+def _finalizar(tab, cid, it, chk, now_mode):
+    it.pop("aviso", None)
+    if now_mode:
+        paso("verificando que quedó Público")
+        v = verificar_publicado(tab, cid, it, chk)
+        if v == "publico": print("  Verificado: el video figura como Público.")
+        elif v == "privado":
+            it["aviso"] = "YouTube lo dejó en Privado (probablemente por la comprobación de derechos). Revisalo en Studio."; print("  AVISO:", it["aviso"])
+        else: print("  No pude confirmar la visibilidad en la lista de Studio (el video sí se envió a publicar).")
+    it["status"] = "published" if now_mode else "scheduled"; it["pct"] = 100
+    it["stage"] = "Publicado" if now_mode else "Programado"; it.pop("est", None)
+
+def _detalles(tab, it, titulo, cuerpo, chk):
+    if titulo:
+        paso("escribiendo el título (IA)"); tab.escribir("#textbox", titulo, 0); time.sleep(0.5)
+    else: paso("sin título de IA: dejo el nombre del archivo")
+    paso("escribiendo la descripción"); tab.escribir("#textbox", cuerpo, 1); time.sleep(0.5)
+    paso("marcando 'no es para niños'")
+    if not marcar_no_ninos(tab, chk):
+        print("  Aviso: no encontré la opción 'No es para niños'; sigo y dejo diagnóstico por si Studio la pide.")
+        tab.captura(ROOT / "aviso-ninos.png"); tab.diagnostico(ROOT / "diagnostico-ninos.txt", "No encontré la opcion de 'para niños'")
+    time.sleep(0.6)
+
+def _cierre_dialogo(tab, cid, it, chk, t0, size_mb, now_mode, when):
+    """Desde 'Siguiente' hasta publicar, dentro del cuadro de subida (Detalles -> Elementos -> Comprobaciones -> Visibilidad)."""
+    avanzar_hasta_visibilidad(tab, it, t0, size_mb, chk); capturar_id(tab, it)
+    fijar_visibilidad(tab, now_mode, when, chk)
     paso("esperando a que termine la subida")
     end = time.time() + 1500
     while True:
-        chk(); up_progress(tab, it, t0, size_mb)
+        chk(); up_progress(tab, it, t0, size_mb); capturar_id(tab, it)
         if tab.habilitado("#done-button"): break
         if now_mode and int(time.time() - t0) % 20 == 0 and not publico_marcado(tab): elegir_publico(tab)   # por si no quedo marcado
-        if time.time() > end: raise RuntimeError("La subida tardó más de 25 minutos")
+        if time.time() > end: raise SubidaInterrumpida("La subida tardó más de 25 minutos")
         time.sleep(1.5)
+    it["_subida_ok"] = True
+    if D is not None: save(D)
     paso("publicando" if now_mode else "programando")
     if not tab.clic_visible("#done-button", True, True): raise RuntimeError("No encontré el botón final de publicar")
     fin = time.time() + 180; forzado = 0
@@ -583,21 +752,173 @@ def studio_upload_one(tab, cid, it, cfg=None):
         if link: it["yt_url"] = link
     except Exception: pass
     _clic_primero(tab, ["#close-button", "ytcp-button#close-button"])
-    it.pop("aviso", None)
-    if now_mode:
-        paso("verificando que quedó Público")
-        v = verificar_publicado(tab, cid, it, chk)
-        if v == "publico": print("  Verificado: el video figura como Público.")
-        elif v == "privado":
-            it["aviso"] = "YouTube lo dejó en Privado (probablemente por la comprobación de derechos). Revisalo en Studio."; print("  AVISO:", it["aviso"])
-        else: print("  No pude confirmar la visibilidad en la lista de Studio (el video sí se envió a publicar).")
-    it["status"] = "published" if now_mode else "scheduled"; it["pct"] = 100
-    it["stage"] = "Publicado" if now_mode else "Programado"; it.pop("est", None)
+    _finalizar(tab, cid, it, chk, now_mode)
+
+def esperar_fin_subida(tab, it, t0, size_mb, chk, limite=1800):
+    """En la página de edición / lista: espera a que el panel 'Subiendo...' termine (si se corta otra vez, avisa)."""
+    paso("esperando que termine la subida reanudada"); fin = time.time() + limite; vio = False; libres = 0; ini = time.time()
+    while time.time() < fin:
+        chk(); up_progress(tab, it, t0, size_mb)
+        txt = texto_progreso(tab)
+        hay = tab.visible("ytcp-multi-progress-monitor") or bool(re.search(r"subiendo|uploading|\d{1,3}\s*%\s*subid", txt, re.I))
+        if re.search(r"subida completada|upload complete|checks complete|procesando|processing|finaliz|completad", txt, re.I) and not re.search(r"subiendo|uploading", txt, re.I): return
+        if hay: vio = True; libres = 0
+        else: libres += 1
+        if (vio and libres >= 4) or (not vio and time.time() - ini > 25): return
+        time.sleep(1.5)
+    raise SubidaInterrumpida("La subida reanudada tardó más de 30 minutos")
+
+def abrir_visibilidad_edicion(tab, chk):
+    """En la página de edición: abre el selector de Visibilidad (Borrador/Privado ▾)."""
+    pats = r"^(borrador|privado|no listado|programado|p[uú]blico|draft|private|unlisted|scheduled|public)$"
+    for _ in range(4):
+        chk()
+        if tab.eval(JS_PUBLICO): return True
+        for sel in ("ytcp-video-metadata-visibility #select-button", "ytcp-video-metadata-visibility ytcp-icon-button", "ytcp-video-metadata-visibility", "#visibility-text"):
+            try:
+                if tab.visible(sel) and tab.clic_visible(sel):
+                    time.sleep(1.5)
+                    if tab.eval(JS_PUBLICO): return True
+            except Exception: pass
+        if tab.clic_texto(pats, "ytcp-text-dropdown-trigger, ytcp-text-dropdown-trigger *, ytcp-video-metadata-visibility *, #select-button, [role=button], button"):
+            time.sleep(1.5)
+            if tab.eval(JS_PUBLICO): return True
+        time.sleep(1.5)
+    return False
+
+def _cierre_edicion(tab, cid, it, chk, now_mode, when, t0=None, size_mb=0, esperar=True):
+    """Publica un borrador ya subido desde su página de edición (Visibilidad -> Público/Programar -> Guardar)."""
+    t0 = t0 or time.time()
+    if esperar: esperar_fin_subida(tab, it, t0, size_mb, chk)
+    it["_subida_ok"] = True
+    if D is not None: save(D)
+    if not abrir_visibilidad_edicion(tab, chk): raise RuntimeError("No pude abrir el selector de Visibilidad en la página de edición")
+    fijar_visibilidad(tab, now_mode, when, chk)
+    paso("guardando la visibilidad")
+    if not (tab.clic_texto(r"^(guardar|listo|save|done)$", TAGS_BOTON) or _clic_primero(tab, ["ytcp-video-visibility-select-dialog #save-button", "#save-button", "#done-button"])):
+        raise RuntimeError("No encontré el botón para confirmar la visibilidad")
+    time.sleep(2)
+    fin = time.time() + 60
+    while time.time() < fin:                      # botón 'Guardar' de arriba (si Studio dejó cambios pendientes)
+        chk()
+        if publicar_de_todas_formas(tab): time.sleep(2); continue
+        if tab.habilitado("#save"): tab.clic_visible("#save", True, True); time.sleep(3); break
+        if not tab.eval(JS_PUBLICO): break
+        time.sleep(1)
+    vid = it.get("_draft") or id_de_url(tab.url()) or (re.search(r"/video/([\w-]{11})", tab.url()) or [None, None])[1]
+    if vid: it["_draft"] = vid; it["yt_url"] = f"https://youtu.be/{vid}"
+    _finalizar(tab, cid, it, chk, now_mode)
+
+def _terminar_borrador(tab, cid, it, chk, now_mode, when):
+    vid = it.get("_draft")
+    if not vid: raise RuntimeError("Subí el video pero no guardé su id: no puedo terminar de publicarlo solo")
+    paso("abriendo el video ya subido para publicarlo")
+    tab.ir(f"https://studio.youtube.com/video/{vid}/edit")
+    if not tab.esperar("ytcp-video-metadata-editor, #textbox", 40, chk): raise RuntimeError("No cargó la página de edición del video")
+    _cierre_edicion(tab, cid, it, chk, now_mode, when, esperar=False)
+
+def _subir_nuevo(tab, cid, it, chk, titulo, cuerpo, now_mode, when, size_mb):
+    abrir_dialogo(tab, cid, chk)
+    paso("enviando el archivo de video")
+    tab.archivos("input[type=file]", [it["file"]]); t0 = time.time()
+    paso("esperando el formulario de detalles")
+    end = time.time() + 120
+    while tab.cuantos("#textbox") < 2:
+        chk()
+        if time.time() > end: raise RuntimeError("Studio no mostró el formulario de título y descripción")
+        time.sleep(1)
+    time.sleep(1.5); up_progress(tab, it, t0, size_mb)
+    _detalles(tab, it, titulo, cuerpo, chk)
+    _cierre_dialogo(tab, cid, it, chk, t0, size_mb, now_mode, when)
+
+def _reanudar(tab, cid, it, chk, titulo, cuerpo, now_mode, when, size_mb):
+    """Hace lo mismo que harías a mano: Contenido del canal -> 'Reanudar subida' -> elegir el archivo en la carpeta media."""
+    nombre = pathlib.Path(it["file"]).name
+    paso("buscando la subida interrumpida en la lista de Studio")
+    f = buscar_cortada(tab, cid, it, chk)
+    if not f: raise RuntimeError("Studio ya no muestra como interrumpida la subida de " + nombre)
+    if f.get("vid"): it["_draft"] = f["vid"]
+    paso("tocando 'Reanudar subida' y entregando el archivo " + nombre)
+    c = tab.eval(JS_CLIC_REANUDAR % json.dumps(nombre))
+    if not c: raise RuntimeError("No encontré el botón 'Reanudar subida' en la fila de " + nombre)
+    if not tab.subir_con_selector(c["x"], c["y"], [it["file"]]): raise RuntimeError("Studio no abrió el selector de archivos al tocar 'Reanudar subida'")
+    print(f"  Reanudar subida: archivo entregado a Studio automáticamente ({nombre}).")
+    t0 = time.time(); _PROG.update(pct=None, t=t0); paso("Studio retomó la subida; esperando su pantalla")
+    fin = time.time() + 90; modo = None; con_prog = None
+    while time.time() < fin:
+        chk()
+        try:
+            u = tab.url()
+            if tab.visible("ytcp-uploads-dialog") and tab.cuantos("#textbox") >= 2: modo = "dialogo"; break
+            m = re.search(r"/video/([\w-]{11})/edit", u)
+            if m: it["_draft"] = m.group(1); modo = "edicion"; break
+            if re.search(r"\d{1,3}\s*%", texto_progreso(tab)): con_prog = con_prog or time.time()
+            if con_prog and time.time() - con_prog > 10: modo = "lista"; break
+        except Cancelled: raise
+        except Exception: pass
+        time.sleep(1)
+    if modo is None: raise RuntimeError("Después de elegir el archivo, Studio no retomó la subida")
+    print("  Studio retomó la subida (" + modo + ").")
+    if modo == "dialogo":
+        capturar_id(tab, it); up_progress(tab, it, t0, size_mb)
+        if not (tab.eval("(function(){var e=window.__A('#textbox')[0];return e?(e.innerText||'').trim():''})()") or "").strip() and titulo: _detalles(tab, it, titulo, cuerpo, chk)
+        _cierre_dialogo(tab, cid, it, chk, t0, size_mb, now_mode, when)
+    elif modo == "edicion": _cierre_edicion(tab, cid, it, chk, now_mode, when, t0, size_mb)
+    else:
+        esperar_fin_subida(tab, it, t0, size_mb, chk); it["_subida_ok"] = True
+        _terminar_borrador(tab, cid, it, chk, now_mode, when)
+
+def studio_upload_one(tab, cid, it, cfg=None, cortadas=None):
+    titulo, desc = textos_para_subir(it, cfg)
+    cuerpo = (desc + "\n\n" if desc else "") + ("#Shorts" if it["kind"] == "short" and "#shorts" not in desc.lower() else "")
+    cuerpo = cuerpo.strip()
+    now_mode = not it.get("publishAt")
+    when = None if now_mode else local(it["publishAt"])
+    size_mb = os.path.getsize(it["file"]) / 1048576
+    chk = lambda: check_cancel(it)
+    auto = (cfg or {}).get("auto_reanudar", True)
+    maxi = MAX_INTENTOS if auto else 1
+    it["status"] = "uploading"; it.pop("error", None); it.pop("yt_url", None); set_prog(it, "up", 0.0, True)
+    nombre = pathlib.Path(it["file"]).name.lower()
+    if it.get("_subida_ok") and it.get("_draft"): modo = "borrador"
+    elif cortadas and nombre in cortadas: modo = "reanudar"
+    else: modo = "nuevo"; it.pop("_draft", None); it.pop("_subida_ok", None)
+    ultimo = None
+    for intento in range(1, maxi + 1):
+        _PROG.update(pct=None, t=time.time())
+        try:
+            asegurar_tab(tab, chk)
+            if modo == "reanudar": _reanudar(tab, cid, it, chk, titulo, cuerpo, now_mode, when, size_mb)
+            elif modo == "borrador": _terminar_borrador(tab, cid, it, chk, now_mode, when)
+            else: _subir_nuevo(tab, cid, it, chk, titulo, cuerpo, now_mode, when, size_mb)
+            for k in ("reanudar", "reintentos", "reanudar_en", "_subida_ok", "_draft"): it.pop(k, None)
+            return
+        except Cancelled: raise
+        except Exception as e:
+            ultimo = e
+            print(f"  Intento {intento}/{maxi} falló en «{STEP[0]}»: {str(e)[:140]}")
+            if intento >= maxi: break
+            guardar_diagnostico(tab, e)
+            it["aviso"] = f"Se cortó la subida ({str(e)[:80]}). La reanudo sola (intento {intento + 1}/{maxi})..."
+            if D is not None: save(D)
+            esperar_internet(chk, 900); espera(min(20 * intento, 90), chk)
+            try: asegurar_tab(tab, chk)
+            except Cancelled: raise
+            except Exception: pass
+            if it.get("_subida_ok") and it.get("_draft"): modo = "borrador"
+            else:
+                try: modo = "reanudar" if buscar_cortada(tab, cid, it, chk) else "nuevo"
+                except Cancelled: raise
+                except Exception: modo = "nuevo"
+            print("  Sigo con:", {"reanudar": "reanudar la subida cortada", "borrador": "publicar el video ya subido", "nuevo": "subirlo de nuevo"}[modo])
+    raise ultimo
 
 def marcar_fallo(d, items, msg):
+    auto = d.get("config", {}).get("auto_reanudar", True)
     for it in items:
         if it["status"] in ("ready", "uploading"):
             it["status"] = "ready"; it["pct"] = 100; it["stage"] = "Listo"; it["error"] = msg[:260]
+            if auto: it["reintentos"] = it.get("reintentos", 0) + 1; it["reanudar"] = True; it["reanudar_en"] = time.time() + min(300 * it["reintentos"], 1800)
     save(d)
 
 def guardar_diagnostico(tab, e):
@@ -611,12 +932,30 @@ def guardar_diagnostico(tab, e):
     except Exception as x: print("  No pude leer la página para el diagnóstico:", x)
     print(f"  Diagnóstico guardado en: {txt}")
 
+def plan_horario(d, it, ahora_mode):
+    """Cuándo sale cada item. Shorts de un mismo video largo: el 1.º ya (o en el próximo horario) y cada siguiente +split_gap horas."""
+    cfg = d.get("config", {}); now = dt.datetime.now().astimezone(); lim = now + dt.timedelta(minutes=15)
+    iso = lambda t: t.astimezone(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    if not it.get("parts"):
+        if ahora_mode: return None
+        if it.get("publishAt") and local(it["publishAt"]) > lim: return it["publishAt"]
+        return next_slot(d, it["kind"])
+    sib = [x for x in d["items"] if x.get("id") == it["id"] and x.get("parts")]
+    base = next((x["split_base"] for x in sib if x.get("split_base")), None)
+    if not base: base = iso(now) if ahora_mode else next_slot(d, it["kind"])
+    for x in sib: x["split_base"] = base
+    t = local(base) + dt.timedelta(hours=float(cfg.get("split_gap") or 0) * (it.get("part", 1) - 1))
+    if t > lim: return iso(t)
+    return None if ahora_mode else next_slot(d, it["kind"])
+
 def studio_upload(d, only=None, mode=None):
-    pending = [i for i in d["items"] if i["status"] == "ready" and (only is None or i["key"] in only)]
+    pending = [i for i in d["items"] if i["status"] in ("ready", "uploading") and i.get("file") and (only is None or i["key"] in only)]
     if not pending: print("No hay videos listos para subir."); return
     now_mode = (mode or d.get("config", {}).get("publish")) == "now"
     for it in pending:
-        it.pop("publishAt", None) if now_mode else it.__setitem__("publishAt", next_slot(d, it["kind"]))
+        pa = plan_horario(d, it, now_mode)
+        if pa: it["publishAt"] = pa
+        else: it.pop("publishAt", None)
     write_plan(pending); save(d)
     tab = cid = None
     try:
@@ -633,10 +972,13 @@ def studio_upload(d, only=None, mode=None):
         if not cid: raise RuntimeError("No detecte tu canal en YouTube Studio. Abri Studio en el Chrome del worker e inicia sesion.")
     except Exception as e:
         print("No pude preparar la subida:", e); marcar_fallo(d, pending, "No pude preparar la subida: " + str(e)); return
+    try: cortadas = revisar_cortadas(tab, cid, pending, lambda: None)
+    except Exception: cortadas = set()
+    auto = d.get("config", {}).get("auto_reanudar", True)
     for it in pending:
         try:
             check_cancel(it)
-            studio_upload_one(tab, cid, it, d.get("config")); print("Subido:", it["title"], it.get("publishAt") or "publicado ahora")
+            studio_upload_one(tab, cid, it, d.get("config"), cortadas); print("Subido:", it["title"], it.get("publishAt") or "publicado ahora")
         except Cancelled:
             it["status"] = "cancelled"; it["stage"] = "Cancelado"; it.pop("publishAt", None)
             print("Cancelado:", it.get("title")); save(d)
@@ -646,6 +988,9 @@ def studio_upload(d, only=None, mode=None):
             guardar_diagnostico(tab, e)
             it["status"] = "ready"; it["pct"] = 100; it["stage"] = "Listo"
             it["error"] = f"No se pudo subir (paso: {STEP[0]}): {str(e)[:150]}"
+            if auto:
+                n = it.get("reintentos", 0) + 1; it["reintentos"] = n; it["reanudar"] = True; it["reanudar_en"] = time.time() + min(300 * n, 1800)
+                it["error"] += f" · Lo reintento solo en unos minutos (intento automático {n}/{MAX_AUTO})."
             print("No se pudo subir automaticamente:", it["title"], "->", STEP[0], "->", e)
             try: tab.ir(f"https://studio.youtube.com/channel/{cid}")        # sale del formulario a medias
             except Exception: pass
@@ -655,8 +1000,9 @@ def studio_upload(d, only=None, mode=None):
 
 def main():
     global D, PLAN
+    if "--reanudar" in sys.argv: return reanudar_only()
     if "--subir" in sys.argv: return upload_only()
-    d = load(); d.setdefault("config", {}); D = d; expand(d); save(d)
+    d = load(); d.setdefault("config", {}); D = d; expand(d); split_items(d); save(d)
     PLAN = make_plan(d["config"], not NO_UPLOAD)
     for it in d["items"]:
         if it["status"] not in ("pending", "processing"): continue
@@ -684,6 +1030,18 @@ def upload_only():
     mode = sys.argv[sys.argv.index("--modo") + 1] if "--modo" in sys.argv else None
     try: studio_upload(d, None if key == "ALL" else {key}, mode)
     except Exception as e: print("Fallo la subida:", e); marcar_fallo(d, d["items"], "Falló la subida: " + str(e))
+    print("Listo.")
+
+def reanudar_only():
+    """Lo lanza el vigilante del servidor: retoma las subidas que quedaron cortadas (marcadas 'reanudar')."""
+    global D, PLAN
+    d = load(); D = d; PLAN = {"up": (0.0, 1.0)}
+    keys = {i["key"] for i in d["items"] if i.get("reanudar") and i.get("status") == "ready"}
+    if not keys: print("Nada para reanudar."); return
+    print("Reanudando subidas cortadas:", len(keys))
+    mode = "schedule" if d.get("config", {}).get("publish") == "schedule" else "now"
+    try: studio_upload(d, keys, mode)
+    except Exception as e: print("Fallo al reanudar:", e); marcar_fallo(d, [i for i in d["items"] if i["key"] in keys], "Falló al reanudar: " + str(e))
     print("Listo.")
 
 if __name__ == "__main__":

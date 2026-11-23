@@ -239,6 +239,26 @@ Responde SOLO este JSON: {{"inicio": <segundo de inicio>, "motivo": "<una frase>
         return {"inicio": s, "prov": NOMBRE[p], "motivo": str(data.get("motivo", ""))[:120]}
     except Exception: return None
 
+def momentos(modo, titulo, segs, dur, L, n):
+    """Pide a la IA los n mejores tramos DISTINTOS (sin solaparse) para sacar n Shorts del mismo video largo."""
+    texto = "\n".join(f"[{int(a)}s] {t}" for a, b, t in segs)[:14000]
+    if not texto.strip() or n < 1: return None
+    data, p = pedir(f'''Eres editor de video. Del video largo elige los {n} tramos CONTINUOS de {L:.0f} segundos más atractivos para {n} Shorts distintos:
+cada uno con gancho fuerte al inicio, una idea completa, sin cortar frases y SIN solaparse entre sí (separados al menos {L:.0f} s).
+Video: "{titulo}" ({dur:.0f} s). Transcripción con marcas de tiempo:
+{texto}
+Responde SOLO este JSON: {{"inicios": [<segundo de inicio de cada tramo>], "motivo": "<una frase>"}}''', modo)
+    try:
+        out = []
+        for s in sorted(float(x) for x in data["inicios"]):
+            if not (0 <= s <= dur - L): continue
+            cerca = min(segs, key=lambda x: abs(x[0] - s))          # pega el inicio al comienzo de una frase
+            if abs(cerca[0] - s) <= 4 and cerca[0] <= dur - L: s = cerca[0]
+            if all(abs(s - o) >= L for o in out): out.append(s)
+        if len(out) < n: return None                                # incompleto: el worker reparte parejo
+        return {"inicios": out[:n], "prov": NOMBRE[p], "motivo": str(data.get("motivo", ""))[:120]}
+    except Exception: return None
+
 def efecto_plan(modo, titulo, texto, kind, L, permitidos):
     cat = "\n".join(f"- {k}: {efectos.EFECTOS[k]}" for k in permitidos if k in efectos.EFECTOS)
     data, p = pedir(f'''Eres editor de video. Para un {"Short vertical" if kind == "short" else "video"} de {L:.0f} s titulado "{titulo}" elige entre 3 y 7 efectos de ESTA lista (solo estos ids) y cómo combinarlos para que el video se sienta dinámico sin saturar.
