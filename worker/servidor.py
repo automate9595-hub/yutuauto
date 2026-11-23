@@ -1,5 +1,5 @@
 """Servidor local: conecta la web con el worker (solo 127.0.0.1)."""
-import ia, piloto, json, os, pathlib, socket, subprocess, sys, threading, time, urllib.request
+import ia, piloto, generador, json, os, pathlib, socket, subprocess, sys, threading, time, urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 ROOT = pathlib.Path(__file__).parent
 MEDIA = ROOT / "media"
@@ -77,7 +77,7 @@ def queue_items():
     global _LAST_ITEMS
     try:
         d = json.loads((ROOT / "queue.json").read_text("utf-8"))
-        _LAST_ITEMS = [dict({k: i.get(k) for k in ("id", "key", "type", "kind", "title", "status", "publishAt", "error", "url", "pct", "stage", "est", "ia", "ia_title", "yt_url", "aviso", "part", "parts", "reanudar", "reintentos")},
+        _LAST_ITEMS = [dict({k: i.get(k) for k in ("id", "key", "type", "kind", "title", "status", "publishAt", "error", "url", "pct", "stage", "est", "ia", "ia_title", "yt_url", "aviso", "part", "parts", "reanudar", "reintentos", "final_title", "origen")},
                             fid=_fid(i), hasfile=bool(i.get("id") and (MEDIA / f"{_fid(i)}_final.mp4").exists())) for i in d.get("items", [])]
     except Exception:
         pass
@@ -201,7 +201,8 @@ class H(BaseHTTPRequestHandler):
         refresh_login()
         self._send({"ok": True, **state, "log": LOG[-40:], "items": queue_items(), "ia": ia.estado(), "piloto": {k: v for k, v in piloto.leer().items() if k not in ("usados", "config")},
                                "tiktok": {k: v for k, v in piloto.leer_tt().items() if k not in ("usados", "rechazados", "lista")},
-                               "tema_tt": {k: v for k, v in piloto.leer_tm().items() if k not in ("usados", "rechazados", "cache", "muertas", "hist")}})
+                               "tema_tt": {k: v for k, v in piloto.leer_tm().items() if k not in ("usados", "rechazados", "cache", "muertas", "hist")},
+                               "piloto_ia": {k: v for k, v in generador.leer().items() if k not in ("ideas", "hist")}})
     def do_POST(self):
         if self._bad_origin(): return self._send({"ok": False}, 403)
         n = int(self.headers.get("Content-Length") or 0); data = json.loads(self.rfile.read(n) or b"{}")
@@ -253,6 +254,14 @@ class H(BaseHTTPRequestHandler):
             except Exception as e: return self._send({"ok": False, "message": "Datos inválidos: " + str(e)})
             log("Piloto TikTok por tema " + ("ACTIVADO" if p["activo"] else "pausado") + f": «{p['tema']}» · {p['shorts']} Shorts + {p['videos']} Videos/día · {p['dias']} días")
             return self._send({"ok": True, "message": "Piloto activado." if p["activo"] else "Piloto en pausa."})
+        if self.path == "/piloto-ia":               # piloto creador: IA crea los Shorts desde cero
+            try:
+                p = generador.configurar(data)
+                if p["activo"] and not p["tema"]: p["activo"] = False; generador.guardar(p); return self._send({"ok": False, "message": "Escribí el tema central."})
+                if data.get("config"): p["config"] = data["config"]; generador.guardar(p)
+            except Exception as e: return self._send({"ok": False, "message": "Datos inválidos: " + str(e)})
+            log("Piloto IA creador " + ("ACTIVADO" if p["activo"] else "pausado") + f": «{p['tema']}» · {p['shorts']} Shorts/día · {', '.join(p['idiomas'])} · {p['dias']} días")
+            return self._send({"ok": True, "message": "Piloto creador activado." if p["activo"] else "Piloto creador en pausa."})
         if self.path == "/cancel":
             request_cancel(data.get("key"), bool(data.get("all")))
             return self._send({"ok": True, "message": "Cancelando..." if state["running"] else "Cancelado."})
@@ -275,15 +284,19 @@ class H(BaseHTTPRequestHandler):
 MAX_AUTO = 8
 def _piloto_tick():
     """Si algún piloto (búsqueda o TikTok) está activo y toca el siguiente video del día: lo agrega a la cola y lanza todo el proceso."""
-    pa, pt, pm = piloto.leer(), piloto.leer_tt(), piloto.leer_tm()
-    if not (pa.get("activo") or pt.get("activo") or pm.get("activo")): return
-    d = read_queue() or {"config": pa.get("config") or pt.get("config") or pm.get("config") or {}, "items": []}
+    pa, pt, pm, pg = piloto.leer(), piloto.leer_tt(), piloto.leer_tm(), generador.leer()
+    if not (pa.get("activo") or pt.get("activo") or pm.get("activo") or pg.get("activo")): return
+    d = read_queue() or {"config": pa.get("config") or pt.get("config") or pm.get("config") or pg.get("config") or {}, "items": []}
     nuevos = []
-    if pa.get("activo"): nuevos += piloto.tick(d.get("items", []), log)
-    if pt.get("activo"): nuevos += piloto.tick_tt(d.get("items", []) + nuevos, log)
-    if pm.get("activo"): nuevos += piloto.tick_tm(d.get("items", []) + nuevos, log)
+    for act, fn, nom in ((pa.get("activo"), piloto.tick, "Piloto"), (pt.get("activo"), piloto.tick_tt, "Piloto TikTok"), (pm.get("activo"), piloto.tick_tm, "Piloto TikTok tema")):
+        if act:
+            try: nuevos += fn(d.get("items", []) + nuevos, log)
+            except Exception as e: log(f"{nom}: error {str(e)[:100]} (sigo con los demás)")
+    if pg.get("activo"):
+        try: nuevos += generador.tick(d.get("items", []) + nuevos, log)
+        except Exception as e: log("Piloto IA: " + str(e)[:100])
     if not nuevos: return
-    d.setdefault("config", pa.get("config") or pt.get("config") or pm.get("config") or {}); d["config"]["publish"] = "now"
+    d.setdefault("config", pa.get("config") or pt.get("config") or pm.get("config") or pg.get("config") or {}); d["config"]["publish"] = "now"
     d["items"] = d.get("items", []) + nuevos; write_queue(d)
     if not launch_chrome(): log("Piloto: no pude abrir Chrome; lo dejo en la cola."); return
     try: (ROOT / "cancel.json").unlink()

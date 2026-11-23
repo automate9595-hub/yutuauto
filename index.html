@@ -45,6 +45,21 @@
 <div class="row"><button class="btn pri" id="tm-on" type="button">Activar piloto ▶</button><button class="btn ghost" id="tm-off" type="button">Pausar</button><span id="tm-msg" class="msg"></span></div>
 <small id="tm-estado" class="sub"></small></section>
 
+<section class="card pad" id="pia" style="display:grid;gap:12px;margin:0 0 16px">
+<h3 style="margin:0">🤖 Piloto creador IA: Shorts hechos 100 % por IA</h3>
+<p class="sub" style="margin:0">Elegí un tema central y cuántos Shorts querés por día. Gemini, Groq y Claude se turnan (idea → guion → título); si una falla, la siguiente sigue sin cortar el proceso. Narra con voz neuronal, genera las imágenes, subtitula y publica solo, sin repetir ideas ni títulos.</p>
+<div class="row"><input id="pi-tema" type="search" placeholder="Tema central · ej: datos curiosos de Mobile Legends" style="flex:1;min-width:220px" autocomplete="off"></div>
+<div class="cfg" style="grid-template-columns:repeat(auto-fit,minmax(130px,1fr))">
+<label>Shorts por día<input id="pi-shorts" type="number" min="1" max="40"></label>
+<label>Durante (días)<input id="pi-dias" type="number" min="1" max="365"></label>
+<label>Duración (s)<input id="pi-dur" type="number" min="20" max="58"></label>
+<label>Voz<select id="pi-voz"><option value="alternar">Alternar</option><option value="hombre">Hombre</option><option value="mujer">Mujer</option></select></label></div>
+<div><small class="sub">Idiomas de los videos (si marcás varios, van rotando):</small>
+<div id="pi-idiomas" class="chips" style="margin-top:6px"></div></div>
+<label>Estilo de las imágenes (opcional)<input id="pi-estilo" type="text" placeholder="ej: ilustración anime épica, colores neón" autocomplete="off"></label>
+<div class="row"><button class="btn pri" id="pi-on" type="button">Activar piloto creador ▶</button><button class="btn ghost" id="pi-off" type="button">Pausar</button><span id="pi-msg" class="msg"></span></div>
+<small id="pi-estado" class="sub"></small></section>
+
 <div class="wiz" id="wiz">
 
 <!-- 1 -->
@@ -129,7 +144,8 @@
 <label class="chk"><input id="c-ia_text" type="checkbox"> Escribir título y descripción (si la IA no responde, se sube con el nombre del archivo)</label>
 <label class="chk"><input id="c-ia_cut" type="checkbox"> Elegir el mejor tramo (Shorts en modo automático)</label>
 <label class="chk"><input id="c-ia_sub" type="checkbox"> Corregir los subtítulos</label>
-<label class="chk"><input id="c-ia_fx" type="checkbox"> Elegir y combinar efectos</label></div></div>
+<label class="chk"><input id="c-ia_fx" type="checkbox"> Elegir y combinar efectos</label>
+<label class="chk"><input id="c-ia_zoom" type="checkbox"> Zooms y efectos en los momentos clave (la IA decide cuándo; sin IA, por ritmo del discurso)</label></div></div>
 <div class="grp"><button class="grp-h" type="button">Gemini <small id="ia-gemini"></small></button><div class="grp-b cfg">
 <input id="k-gemini" type="password" placeholder="Pegá la clave de Gemini" autocomplete="off">
 <div class="row"><button class="btn pri sm" data-ia="gemini" data-a="save">Guardar clave</button><button class="btn ghost sm" data-ia="gemini" data-a="test">Probar</button><button class="btn ghost sm danger" data-ia="gemini" data-a="del">Borrar</button></div>
@@ -184,4 +200,4 @@
 
 <div class="dock"><div id="dock-msg" class="dock-msg">Listo para procesar</div><button class="btn pri" id="dock-go" type="button">Procesar y publicar todo ⚡</button></div>
 <div id="win" class="win-back" aria-hidden="true"><div class="win" role="dialog" aria-modal="true"><div class="win-bar"><span class="d r" data-close></span><span class="d y" data-close></span><span class="d g"></span><b id="win-title"></b></div><div id="win-body" class="win-body"></div></div></div>
-<footer>Yutu Studio · v17.0</footer><script src="app.js"></script></body></html>
+<footer>Yutu Studio · v18.0</footer><script src="app.js"></script></body></html>

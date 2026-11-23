@@ -2,6 +2,9 @@
 import json, pathlib, subprocess, sys, time, datetime as dt
 import ia
 ROOT = pathlib.Path(__file__).parent
+def _imp():
+    try: import curl_cffi; return ["--impersonate", "chrome"]
+    except Exception: return []
 PF = ROOT / "piloto.json"
 VARIANTES = ["{t}", "{t} mejores momentos", "{t} compilación", "{t} gracioso", "{t} épico", "{t} viral", "{t} 2026", "{t} funny moments", "{t} best plays", "{t} clips"]
 
@@ -44,7 +47,7 @@ def elegir(p, kind, ya, modo="alternar"):
         top = ok[:6]; pick = top[0]
         try:                                     # la IA elige el más relevante de los primeros (si falla, queda el primero de la búsqueda)
             lista = "\n".join(f"{i}. {r['title']} ({r['dur']}s, {r['views']} vistas)" for i, r in enumerate(top))
-            txt = ia.pedir(f"Tema central: «{tema}». Elegí el video más relevante y atractivo para el tema. Respondé SOLO el número.\n{lista}", modo)
+            txt = ia.texto(f"Tema central: «{tema}». Elegí el video más relevante y atractivo para el tema. Respondé SOLO el número.\n{lista}", modo)
             import re; m = re.search(r"\d+", txt or "")
             if m and int(m.group(0)) < len(top): pick = top[int(m.group(0))]
         except Exception: pass
@@ -107,8 +110,8 @@ def configurar_tt(d):
     guardar_tt(p); return p
 
 def _listar_cuenta(cuenta):
-    r = subprocess.run([sys.executable, "-m", "yt_dlp", f"https://www.tiktok.com/{cuenta}", "--flat-playlist", "--dump-json", "--no-warnings"],
-                       capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=300)
+    r = subprocess.run([sys.executable, "-m", "yt_dlp", f"https://www.tiktok.com/{cuenta}", "--flat-playlist", "--dump-json", "--no-warnings", "--playlist-end", "80"] + _imp(),
+                       capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=150)
     out = []
     for l in r.stdout.splitlines():
         try: j = json.loads(l)
@@ -121,7 +124,7 @@ def _listar_cuenta(cuenta):
 def es_mobile_legends(texto, cuenta, modo="alternar"):
     """Verifica con la IA que el video es de Mobile Legends (si la IA no responde, usa palabras clave)."""
     try:
-        txt = ia.pedir(f"Cuenta de TikTok: {cuenta}\nTexto/hashtags del video: «{texto or '(sin texto)'}»\n¿Este video es de Mobile Legends: Bang Bang (el juego)? "
+        txt = ia.texto(f"Cuenta de TikTok: {cuenta}\nTexto/hashtags del video: «{texto or '(sin texto)'}»\n¿Este video es de Mobile Legends: Bang Bang (el juego)? "
                        "Si el texto está vacío, decidí por el nombre de la cuenta. Respondé SOLO SI o NO.", modo)
         if txt:
             t = txt.strip().upper()
@@ -143,10 +146,11 @@ def tick_tt(items_existentes, log=print):
     if time.time() - h["ultimo"] < max(8 * 60, (15 * 3600) // p["por_dia"]):
         p["estado"] = f"Día {dia}/{p['dias']}: {h['n']}/{p['por_dia']} publicados hoy."; guardar_tt(p); return []
     ya = {i.get("id") for i in items_existentes} | set(p["usados"]) | set(p["rechazados"])
+    if not p.get("lista") and time.time() - p.get("lista_t", 0) < 600: return []      # no insistir cada minuto si TikTok no respondió
     if not p.get("lista") or time.time() - p.get("lista_t", 0) > 6 * 3600:
         try: p["lista"] = _listar_cuenta(p["cuenta"]); p["lista_t"] = time.time()
         except Exception as e: p["estado"] = "No pude leer la cuenta de TikTok: " + str(e)[:80]; guardar_tt(p); log("TikTok: " + p["estado"]); return []
-        if not p["lista"]: p["estado"] = "La cuenta no devolvió videos (¿privada, mal escrita o TikTok bloqueó la lectura?)."; guardar_tt(p); log("TikTok: " + p["estado"]); return []
+        if not p["lista"]: p["estado"] = "La cuenta no devolvió videos (¿privada, mal escrita o TikTok bloqueó la lectura?). Reinstalá con 2-INSTALAR-Y-EJECUTAR.bat (agrega curl_cffi) y reintento en 6 h."; guardar_tt(p); log("TikTok: " + p["estado"]); return []
     libres = [v for v in p["lista"] if v["id"] not in ya]
     if not libres: p["estado"] = "Ya se usaron todos los videos válidos de la cuenta."; guardar_tt(p); log("TikTok: " + p["estado"]); return []
     if p["orden"] == "aleatorio": random.shuffle(libres)
@@ -185,8 +189,8 @@ def configurar_tm(d):
 def _fuentes_ia(p, modo="alternar"):
     """La IA propone hashtags y cuentas de TikTok distintas para el tema (las que no existan se descartan solas)."""
     usadas = ", ".join(p["fuentes"][-40:]) or "ninguna"
-    txt = ia.pedir(f"Tema central: «{p['tema']}». Proponé 12 FUENTES NUEVAS de TikTok para encontrar videos de ese tema: hashtags (con #) y cuentas conocidas (con @). "
-                   f"Variá idioma (español e inglés) y subtemas. No repitas estas: {usadas}. Respondé SOLO una lista separada por comas.", modo) or ""
+    txt = ia.texto(f"Tema central: «{p['tema']}». Proponé 12 FUENTES NUEVAS de TikTok para encontrar videos de ese tema: hashtags (con #) y cuentas conocidas (con @). "
+                   f"Variá idioma (español e inglés) y subtemas. No repitas estas: {usadas}. Respondé en r una lista separada por comas.", modo) or ""
     nuevas = []
     for x in re.findall(r"[#@][\w.\-]{2,40}", txt):
         x = x.lower()
@@ -198,8 +202,8 @@ def _fuentes_ia(p, modo="alternar"):
 
 def _listar_fuente(f):
     url = f"https://www.tiktok.com/tag/{f[1:]}" if f.startswith("#") else f"https://www.tiktok.com/{f}"
-    r = subprocess.run([sys.executable, "-m", "yt_dlp", url, "--flat-playlist", "--dump-json", "--no-warnings", "--playlist-end", "60"],
-                       capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=240)
+    r = subprocess.run([sys.executable, "-m", "yt_dlp", url, "--flat-playlist", "--dump-json", "--no-warnings", "--playlist-end", "40"] + _imp(),
+                       capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=120)
     out = []
     for l in r.stdout.splitlines():
         try: j = json.loads(l)
@@ -209,9 +213,18 @@ def _listar_fuente(f):
                             "url": j.get("webpage_url") or j.get("url") or ""})
     return out
 
+def _respaldo_youtube(tema, n=30):
+    """TikTok bloquea la lectura a veces: se buscan Shorts del tema en YouTube para no quedarse parado."""
+    out = []
+    for q in (f"{tema} shorts", f"{tema} tiktok compilation", f"{tema} funny moments"):
+        try: res = _buscar(q, n)
+        except Exception: continue
+        out += [{"id": r["id"], "t": r["title"], "dur": r["dur"], "url": "https://www.youtube.com/watch?v=" + r["id"]} for r in res if 5 < (r["dur"] or 0) <= 1500]
+    return out
+
 def es_del_tema(texto, tema, modo="alternar"):
     try:
-        txt = ia.pedir(f"Tema central: «{tema}»\nTexto/hashtags del video de TikTok: «{texto or '(sin texto)'}»\n¿El video trata de ese tema? Respondé SOLO SI o NO.", modo)
+        txt = ia.texto(f"Tema central: «{tema}»\nTexto/hashtags del video de TikTok: «{texto or '(sin texto)'}»\n¿El video trata de ese tema? Respondé SOLO SI o NO.", modo)
         if txt:
             t = txt.strip().upper()
             if t[:2] in ("SI", "SÍ") or t.startswith("YES"): return True
@@ -234,18 +247,25 @@ def tick_tm(items_existentes, log=print):
     if time.time() - h["ultimo"] < gap: p["estado"] = f"Día {dia}/{p['dias']}: Shorts {h['short']}/{p['shorts']} · Videos {h['video']}/{p['videos']}"; guardar_tm(p); return []
     kind = "video" if (fv > 0 and (fs <= 0 or fv / max(p["videos"], 1) >= fs / max(p["shorts"], 1))) else "short"
     ya = {i.get("id") for i in items_existentes} | set(p["usados"]) | set(p["rechazados"])
-    for _ in range(6):                                      # prueba hasta 6 fuentes distintas, al azar
-        vivas = [f for f in p["fuentes"] if f not in p["muertas"] and any(v["id"] not in ya for v in p["cache"].get(f, [None]) if v) or f not in p["cache"] and f not in p["muertas"]]
-        if not vivas:
+    def vivas():
+        return [f for f in p["fuentes"] if f not in p["muertas"] and (f not in p["cache"] or any(v["id"] not in ya for v in p["cache"][f]))]
+    for _ in range(8):                                      # prueba hasta 8 fuentes distintas, al azar
+        vs = vivas()
+        if not vs:
             try: nuevas = _fuentes_ia(p)
-            except Exception: nuevas = []
-            if not nuevas: p["estado"] = "No encuentro fuentes nuevas para ese tema."; guardar_tm(p); log("TikTok tema: " + p["estado"]); return []
-            log("TikTok tema: la IA propuso fuentes nuevas: " + ", ".join(nuevas[:8])); continue
-        f = random.choice(vivas)
+            except Exception as e: nuevas = []; log("TikTok tema: error pidiendo fuentes: " + str(e)[:80])
+            if not nuevas:
+                if "youtube-respaldo" not in p["cache"]:
+                    p["cache"]["youtube-respaldo"] = _respaldo_youtube(p["tema"]); p["fuentes"].append("youtube-respaldo")
+                    log("TikTok tema: sin fuentes nuevas; uso Shorts de YouTube como respaldo.")
+                    continue
+                p["estado"] = "No encuentro fuentes nuevas para ese tema."; guardar_tm(p); log("TikTok tema: " + p["estado"]); return []
+            log("TikTok tema: fuentes nuevas: " + ", ".join(nuevas[:8])); continue
+        f = random.choice(vs)
         if f not in p["cache"]:
             try: p["cache"][f] = _listar_fuente(f)
             except Exception: p["cache"][f] = []
-            if not p["cache"][f]: p["muertas"].append(f); log(f"TikTok tema: fuente sin videos, la descarto: {f}"); continue
+            if not p["cache"][f]: p["muertas"].append(f); log(f"TikTok tema: {f} no devolvió videos, la descarto"); continue
         cand = [v for v in p["cache"][f] if v["id"] not in ya]
         if kind == "video": cand = [v for v in cand if not v["dur"] or v["dur"] >= 60] or cand
         random.shuffle(cand)
@@ -254,8 +274,7 @@ def tick_tm(items_existentes, log=print):
             p["usados"].append(v["id"]); h[kind] += 1; h["ultimo"] = time.time()
             p["hist"] = (p.get("hist", []) + [{"id": v["id"], "t": v["t"][:80], "f": f, "k": kind, "d": hoy.isoformat()}])[-200:]
             p["estado"] = f"Día {dia}/{p['dias']}: {kind} de {f}. Shorts {h['short']}/{p['shorts']} · Videos {h['video']}/{p['videos']}"
-            p["cache"] = {k: x for k, x in p["cache"].items() if k == f or len(p["cache"]) < 25}
             guardar_tm(p); log("TikTok tema: " + p["estado"])
             return [{"type": "video", "id": v["id"], "key": "video:" + v["id"], "kind": kind, "url": v["url"], "status": "pending", "n": 1, "auto": True, "origen": "tiktok"}]
-        p["muertas"].append(f) if not [v for v in p["cache"][f] if v["id"] not in ya] else None
+        if not [v for v in p["cache"][f] if v["id"] not in ya] and f not in p["muertas"]: p["muertas"].append(f)
     p["estado"] = "Ningún video revisado era del tema; pruebo otras fuentes en el próximo ciclo."; guardar_tm(p); return []

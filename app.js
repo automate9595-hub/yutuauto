@@ -6,7 +6,7 @@ sub:true,lang:"es-latino",stt:"auto",model:"small",sub_pos:"bottom",sub_size:"m"
 cut_mode:"auto",cut_start:0,short_len:58,frame:"crop",vid_trim:false,vid_start:0,vid_len:0,
 fx_list:[],fx_mode:"seq",fx_dur:3,fx_gap:0,fx_blend:0.6,fx_power:1,fx_start:0,fx_repeat:true,
 vivid:false,vignette:false,fade:false,loudnorm:false,
-ia_mode:"alternar",ia_cut:true,ia_fx:true,ia_sub:true,ia_text:true,
+ia_mode:"alternar",ia_cut:true,ia_fx:true,ia_zoom:true,ia_sub:true,ia_text:true,
 split_n:1,split_gap:6,split_mode:"auto",auto_reanudar:true};
 let saved=load(C,null);if(saved===null){saved=load(C_OLD,{});delete saved.publish}   /* migra la config anterior; la publicación vuelve a "inmediata" */
 let cfg=Object.assign({},DEF,saved);if(String(cfg.ia_mode).includes("grok"))cfg.ia_mode=String(cfg.ia_mode).replace("grok","groq");
@@ -50,7 +50,7 @@ $("g-split").textContent=(+cfg.split_n||1)>1?cfg.split_n+" por video":"";
 set(4,`${(+cfg.split_n||1)>1?cfg.split_n+' Shorts por video (1 cada '+(cfg.split_gap||0)+' h) · ':''}Short ${cfg.short_len||58} s · ${({auto:"tramo automático",inicio:"desde el inicio",manual:"desde el seg. "+cfg.cut_start})[cfg.cut_mode]}${cfg.vid_trim?" · videos recortados":""}`,true);
 const ac=["vivid","vignette","fade","loudnorm"].filter(k=>cfg[k]).length;
 set(5,`${cfg.fx_list.length?cfg.fx_list.length+" efectos":"Sin efectos"}${ac?" · "+ac+" de acabado":""}`,true);
-const tareas=["ia_text","ia_cut","ia_sub","ia_fx"].filter(k=>cfg[k]).length;
+const tareas=["ia_text","ia_cut","ia_sub","ia_fx","ia_zoom"].filter(k=>cfg[k]).length;
 set(6,cfg.ia_mode==="apagado"?"IA apagada":`IA ${L.ia[cfg.ia_mode]||cfg.ia_mode} · ${tareas} tareas`,true);
 set(7,cfg.publish==="now"?"Publicar de inmediato":`Programar · ${cfg.sn} Shorts y ${cfg.vn} videos por día`,true);
 $("sch-box").style.display=cfg.publish==="schedule"?"":"none"}
@@ -204,3 +204,19 @@ $("tm-on").onclick=()=>tmSend(true);$("tm-off").onclick=()=>tmSend(false);
 async function tmPoll(){if(document.hidden)return;const s=await call("/status");if(!s||!s.tema_tt||!s.tema_tt.tema)return;const p=s.tema_tt;
 $("tm-estado").textContent=(p.activo?"🟢 Activo · ":"⏸ En pausa · ")+(p.estado||"Esperando el primer ciclo (hasta 1 min).")+(p.fuentes?" · "+p.fuentes.length+" fuentes encontradas":"")}
 setInterval(tmPoll,8000);tmPoll();
+
+
+/* ---------- piloto creador IA ---------- */
+const PI_K="yutu-piloto-ia",IDI={"es-MX":"Español latino (México)","es-AR":"Español latino (Argentina)","es-CO":"Español latino (Colombia)","es-US":"Español latino (EE. UU.)","es-ES":"Español (España)","en-US":"Inglés","pt-BR":"Portugués (Brasil)","fr-FR":"Francés","de-DE":"Alemán","it-IT":"Italiano"};
+const pi=Object.assign({tema:"",shorts:5,dias:30,duracion:45,voz:"alternar",estilo:"",idiomas:["es-MX"]},load(PI_K,{}));if(!Array.isArray(pi.idiomas)||!pi.idiomas.length)pi.idiomas=["es-MX"];
+const piSave=()=>{try{localStorage.setItem(PI_K,JSON.stringify(pi))}catch{}};
+const piIds={tema:"pi-tema",shorts:"pi-shorts",dias:"pi-dias",duracion:"pi-dur",voz:"pi-voz",estilo:"pi-estilo"};
+for(const k in piIds){const el=$(piIds[k]);el.value=pi[k];el.oninput=()=>{pi[k]=el.type==="number"?Math.max(0,+el.value||0):el.value;piSave()}}
+function piChips(){$("pi-idiomas").innerHTML=Object.keys(IDI).map(k=>`<label class="fxc${pi.idiomas.includes(k)?" on":""}"><input type="checkbox" data-pi="${k}" ${pi.idiomas.includes(k)?"checked":""}><span>${IDI[k]}</span></label>`).join("")}
+$("pi-idiomas").onchange=e=>{const k=e.target.dataset.pi;if(!k)return;pi.idiomas=pi.idiomas.filter(x=>x!==k);if(e.target.checked)pi.idiomas.push(k);if(!pi.idiomas.length)pi.idiomas=["es-MX"];piSave();piChips()};piChips();
+const piSend=async activo=>{const m=$("pi-msg");if(activo&&!pi.tema.trim()){m.textContent="Escribí el tema central.";m.className="msg err";return}
+const r=await call("/piloto-ia",{...pi,activo,config:cfg},8000);m.className="msg"+(r&&r.ok?"":" err");m.textContent=r?r.message:"No encuentro el worker. Ejecutá 2-INSTALAR-Y-EJECUTAR.bat.";piPoll()};
+$("pi-on").onclick=()=>piSend(true);$("pi-off").onclick=()=>piSend(false);
+async function piPoll(){if(document.hidden)return;const s=await call("/status");if(!s||!s.piloto_ia||!s.piloto_ia.tema)return;const p=s.piloto_ia;
+$("pi-estado").textContent=(p.activo?"🟢 Activo · ":"⏸ En pausa · ")+(p.estado||"Esperando el primer ciclo (hasta 1 min).")}
+setInterval(piPoll,8000);piPoll();

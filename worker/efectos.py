@@ -85,3 +85,32 @@ def build(cfg, W, H, L):
             U = u
         out += _filters(eid, E, A, PH, U, W, H, p)
     return out
+
+
+ZOOMS = ("zoomin", "zoomout", "pulse", "shake")
+
+def build_eventos(eventos, W, H, L, power=1.0):
+    """Efectos en momentos EXACTOS (los decide la IA o el respaldo por subtitulos).
+    eventos = [{"t": seg, "dur": seg, "fx": id}]. Todos los zooms se funden en UN solo filtro (rapido)."""
+    ev = [e for e in (eventos or []) if e.get("fx") in EFECTOS][:16]
+    if not ev: return []
+    p = round(min(1.5, max(0.2, float(power))), 2); out = []
+    zsum, ssum = [], []
+    for e in ev:
+        a = max(0.0, float(e["t"])); d = max(0.5, float(e.get("dur", 1.5))); b = a + d; R = min(0.35, d / 2)
+        A = f"between(t,{a:.2f},{b:.2f})"
+        E = f"({A}*min(1,min(t-{a:.2f},{b:.2f}-t)/{R:.2f}))"
+        PH = f"min(1,max(0,(t-{a:.2f})/{d:.2f}))"
+        U = f"max(0,t-{a:.2f})"
+        if e["fx"] == "zoomin": zsum.append(f"0.20*{p}*{E}*{PH}")
+        elif e["fx"] == "zoomout": zsum.append(f"0.20*{p}*{E}*(1-{PH})")
+        elif e["fx"] == "pulse": zsum.append(f"0.08*{p}*{E}*abs(sin(t*6))")
+        elif e["fx"] == "shake": zsum.append(f"0.06*{p}*{E}"); ssum.append(E)
+        else: out += _filters(e["fx"], E, A, PH, U, W, H, p)
+    if zsum:
+        z = "1+" + "+".join(zsum)
+        sh = "min(1," + "+".join(ssum) + ")" if ssum else "0"
+        x = f"(iw-ow)/2*(1+{sh}*sin(t*23))" if ssum else "(iw-ow)/2"
+        y = f"(ih-oh)/2*(1+{sh}*cos(t*29))" if ssum else "(ih-oh)/2"
+        out = _zc(W, H, z, x, y) + out
+    return out

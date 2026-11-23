@@ -1,4 +1,19 @@
-YUTU WORKER (v14)
+YUTU WORKER (v18)
+
+NOVEDADES v18
+- PILOTOS TIKTOK ARREGLADOS: la IA les devolvia un formato incompatible y los dos se quedaban sin hacer nada. Ahora leen TikTok
+  haciéndose pasar por Chrome (curl_cffi) y, si TikTok bloquea, el piloto por tema sigue con Shorts de YouTube del mismo tema.
+- MAS RAPIDO: el siguiente video se descarga mientras se edita el actual; cada video se SUBE apenas queda listo (antes se editaba
+  todo y recién después se subía); no se vuelve a transcribir lo que ya se transcribió; subtitulos corregidos por la IA en paralelo;
+  el título se piensa mientras FFmpeg codifica; FFmpeg en modo veryfast; descarga con 4 fragmentos a la vez.
+- IA: zooms y efectos en los momentos exactos que decide la IA (paso 6, casilla nueva). Sin IA usa el ritmo del discurso.
+- PILOTO CREADOR IA (arriba en la web): tema + Shorts por dia + idiomas (incluye español latino México/Argentina/Colombia/EE.UU.).
+  Gemini escribe la idea, Groq el guion y Claude el título; si una falla, la siguiente sigue. Voz neuronal (edge-tts), imagenes
+  por IA (Pollinations), subtitulos sincronizados y publicación automática.
+- SUBIDA: no toca "Siguiente" hasta que Studio termina de subir y COMPROBAR (100 %, "Comprobaciones completadas"); después pasa
+  por todas las etapas verificando que la pantalla cambie, y publica ("Publicar de todas formas" si pregunta).
+- TITULOS UNICOS: nunca se usa el título del video copiado, el original ni uno ya usado (registro en titulos-usados.json).
+
 1) Ejecuta 2-INSTALAR-Y-EJECUTAR.bat. Instala todo con pip, se cierra solo y deja el worker
    en segundo plano con un icono "Y" junto al wifi/bateria (verde = activo, azul = procesando).
 2) En la web hay 9 pasos desplegables: Conectar, Videos, Subtitulos, Recorte, Efectos, IA, Publicacion,

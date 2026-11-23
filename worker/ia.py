@@ -210,6 +210,12 @@ def pedir(prompt, modo="alternar"):
             print(f"  IA {_explicar(p, e)} Sigo con otra IA o sin IA.")
     return None, None
 
+def texto(prompt, modo="alternar"):
+    """Respuesta en texto plano (para los pilotos). Devuelve '' si ninguna IA responde. Nunca lanza excepciones."""
+    data, p = pedir(prompt + '\nResponde SOLO este JSON: {"r": "<tu respuesta>"}', modo)
+    try: return str(data.get("r", "")).strip() if data else ""
+    except Exception: return ""
+
 def probar(p):
     d = cargar()
     if not d.get(p): return False, f"Falta la clave de {NOMBRE[p]}."
@@ -277,15 +283,39 @@ Responde SOLO este JSON: {{"fx_list": ["id", ...], "fx_mode": "seq|overlap|rando
                 "motivo": str(data.get("motivo", ""))[:120]}
     except Exception: return None
 
-def textos(modo, titulo, texto, kind):
+def textos(modo, titulo, texto, kind, prohibidos=(), idioma=""):
+    """Titulo y descripcion NUEVOS: nunca iguales al original ni a los ya usados (lista 'prohibidos')."""
+    pro = "\n".join("- " + str(x)[:100] for x in list(prohibidos)[-40:]) or "(ninguno)"
     data, p = pedir(f'''Eres editor de YouTube. Escribe un título y una descripción para este {"Short" if kind == "short" else "video"}.
-Título original: "{titulo}". Contenido (extracto): {texto[:1500] or "(sin texto)"}
-Reglas: mismo idioma del contenido, título atractivo de máximo 90 caracteres, sin mentiras ni promesas falsas, sin inventar datos; descripción de 2 a 3 frases y 3 a 5 hashtags al final.
+Título original (NO lo copies ni lo parafrasees de cerca): "{titulo}". Contenido (extracto): {texto[:1500] or "(sin texto)"}
+Títulos que YA se usaron (el tuyo debe ser claramente distinto de todos, con otro gancho y otras palabras clave):
+{pro}
+Reglas: {("idioma: " + idioma + ".") if idioma else "mismo idioma del contenido."} Título atractivo de máximo 90 caracteres basado en lo que PASA en este clip, sin mentiras ni promesas falsas, sin inventar datos; descripción de 2 a 3 frases y 3 a 5 hashtags al final.
 Responde SOLO este JSON: {{"titulo": "...", "descripcion": "..."}}''', modo)
     try:
         t, desc = str(data["titulo"]).strip(), str(data["descripcion"]).strip()
         if not t or not desc: return None
         return {"titulo": t[:95], "descripcion": desc[:1500], "prov": NOMBRE[p]}
+    except Exception: return None
+
+def eventos(modo, titulo, frases, kind, L, permitidos):
+    """La IA decide CUANDO poner zooms y efectos: lista de {t, dur, fx} sobre el tramo (tiempos relativos al clip)."""
+    txt = "\n".join(f"[{a:.1f}s] {t}" for a, b, t in frases)[:6000]
+    cat = ", ".join(k for k in permitidos if k in efectos.EFECTOS)
+    data, p = pedir(f'''Eres editor de video de {"Shorts" if kind == "short" else "YouTube"}. El clip dura {L:.0f} s y se titula "{titulo}".
+Transcripción con tiempos (segundos desde el inicio del clip):
+{txt or "(sin voz: reparte los efectos parejo)"}
+Decide en qué momentos exactos poner zoom/efectos para dar ritmo: zoom de acercamiento en las frases clave o remates, destello o glitch en los cambios de idea, pulso o temblor en los momentos intensos. Entre 4 y {max(4, min(14, int(L // 4)))} eventos, separados al menos 2 s, el primero antes de los 2 s (gancho).
+Solo puedes usar estos ids de efecto: {cat}.
+Responde SOLO este JSON: {{"eventos": [{{"t": <segundo>, "dur": <1 a 3>, "fx": "<id>"}}, ...], "motivo": "<una frase>"}}''', modo)
+    try:
+        out = []
+        for e in data["eventos"]:
+            t, d, fx = float(e["t"]), min(3.0, max(0.8, float(e.get("dur", 1.5)))), str(e["fx"])
+            if fx in permitidos and fx in efectos.EFECTOS and 0 <= t < L - 0.5 and all(abs(t - o["t"]) >= 1.5 for o in out):
+                out.append({"t": round(t, 2), "dur": round(min(d, L - t), 2), "fx": fx})
+        out.sort(key=lambda x: x["t"])
+        return {"eventos": out[:16], "prov": NOMBRE[p], "motivo": str(data.get("motivo", ""))[:120]} if len(out) >= 2 else None
     except Exception: return None
 
 def corregir_subs(modo, titulo, lineas):

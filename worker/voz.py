@@ -18,6 +18,7 @@ GROQ_MODELOS = {"groq_v3": "whisper-large-v3", "groq_turbo": "whisper-large-v3-t
 LOCAL_ALIAS = {"turbo": "large-v3-turbo", "large": "large-v3"}
 LOCAL_REPO = {"large-v3-turbo": ["large-v3-turbo", "deepdml/faster-whisper-large-v3-turbo-ct2"]}
 _WM, _VM, _FALLO = {}, {}, set()
+ULTIMO = ""
 TROZO = 240         # segundos por envio a la nube (cada trozo pesa pocos MB)
 
 class Palabra:
@@ -211,6 +212,7 @@ def palabras(ffmpeg, src, start, length, lang, modelo, prog, chk, motor="auto", 
                 if data is None: data = pcm(ffmpeg, src, start, length)
                 out = _con_whisper(data, lang, modelo, titulo, prog, chk) if m == "local" else _con_vosk(data, lang, prog, chk)
             if not out and m != "vosk": errs.append(f"{m}: sin palabras"); continue
+            globals()["ULTIMO"] = m
             print("  Voz: " + NOMBRES[m] + (f" ({LOCAL_ALIAS.get(modelo, modelo)})" if m == "local" else ""))
             return out
         except KeyboardInterrupt: raise
