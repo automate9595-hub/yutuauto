@@ -104,3 +104,12 @@ footer{text-align:center;color:#5f7089;padding:20px 0 90px;font-size:13px}
 
 .item{grid-template-columns:40px 1fr auto auto auto}.nn{display:flex;align-items:center;gap:4px;color:var(--mu);font-size:13px;cursor:default}.nn input{width:52px;padding:6px 8px;border-radius:8px;text-align:center}
 @media(max-width:520px){.item{grid-template-columns:36px 1fr auto auto}.nn{justify-self:end}}
+
+.ptabs{display:flex;gap:8px;overflow-x:auto;padding:4px 0 10px;margin:0 0 6px;scrollbar-width:thin}
+.ptabs button{flex:0 0 auto;position:relative;background:var(--in);color:var(--tx);border:1px solid var(--bd);border-radius:12px;padding:11px 14px;font:inherit;font-size:14px;font-weight:600;cursor:pointer;white-space:nowrap}
+.ptabs button.on{border-color:var(--mint);background:#10281f;color:#fff}
+.ptabs button i{display:none;position:absolute;top:6px;right:6px;width:9px;height:9px;border-radius:50%;background:var(--mint);box-shadow:0 0 0 3px #10281f}
+.ptabs button i.act{display:block}
+.phid{display:none!important}
+.two{display:grid;grid-template-columns:1fr 92px;gap:8px}
+@media(max-width:560px){.ptabs button{padding:10px 11px;font-size:13px}.stp-b .cfg,.card .cfg{grid-template-columns:1fr!important}}

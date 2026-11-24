@@ -6,7 +6,7 @@ sub:true,lang:"es-latino",stt:"auto",model:"small",sub_pos:"bottom",sub_size:"m"
 cut_mode:"auto",cut_start:0,short_len:58,frame:"crop",vid_trim:false,vid_start:0,vid_len:0,
 fx_list:[],fx_mode:"seq",fx_dur:3,fx_gap:0,fx_blend:0.6,fx_power:1,fx_start:0,fx_repeat:true,
 vivid:false,vignette:false,fade:false,loudnorm:false,
-ia_mode:"alternar",ia_cut:true,ia_fx:true,ia_zoom:true,ia_sub:true,ia_text:true,
+ia_mode:"alternar",ia_cut:true,ia_fx:true,ia_zoom:true,lista_cada:0,ia_sub:true,ia_text:true,
 split_n:1,split_gap:6,split_mode:"auto",auto_reanudar:true};
 let saved=load(C,null);if(saved===null){saved=load(C_OLD,{});delete saved.publish}   /* migra la config anterior; la publicación vuelve a "inmediata" */
 let cfg=Object.assign({},DEF,saved);if(String(cfg.ia_mode).includes("grok"))cfg.ia_mode=String(cfg.ia_mode).replace("grok","groq");
@@ -71,7 +71,7 @@ $("list").oninput=e=>{const t=e.target;if(t.dataset.n){const x=q.find(y=>y.key==
 $("list").onclick=e=>{const t=e.target;if(t.dataset.n)return;if(t.dataset.r){q=q.filter(x=>x.key!==t.dataset.r);save()}if(t.dataset.k){q.find(x=>x.key===t.dataset.k).kind=t.dataset.v;save()}};
 $("add").onclick=()=>{const L=$("links").value.split(/\n|,|;/).map(s=>s.trim()).filter(Boolean),m=$("msg");
 if(!L.length){m.textContent="Pegá al menos un enlace.";m.className="msg err";return}
-let a=0,d=0,i=0;for(const l of L){const p=parse(l);if(!p){i++;continue}const key=p.type+":"+p.id;if(q.some(x=>x.key===key)){d++;continue}q.push({...p,key,status:"pending"});a++}
+let a=0,d=0,i=0;for(const l of L){const p=parse(l);if(!p){i++;continue}const key=p.type+":"+p.id;if(q.some(x=>x.key===key)){d++;continue}q.push({...p,key,status:"pending",nuevo:true});a++}
 save();m.textContent=`Agregados ${a} · repetidos ${d} · no reconocidos ${i}`;m.className="msg"+(a||d?"":" err");if(a)$("links").value=""};
 $("clr").onclick=()=>{$("links").value="";$("msg").textContent=""};
 $("empty").onclick=()=>{if(q.length&&confirm("¿Vaciar la cola?")){q=[];save()}};
@@ -104,7 +104,7 @@ $("open-guide").onclick=()=>openWin("Guía de activación",`<ol><li>Ejecutá <co
 
 /* ---------- worker local ---------- */
 const API="http://127.0.0.1:8765";
-async function call(path,body,ms=4000){const c=new AbortController(),t=setTimeout(()=>c.abort(),ms);
+async function call(path,body,ms=12000){const c=new AbortController(),t=setTimeout(()=>c.abort(),ms);
 try{const r=await fetch(API+path,body?{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body),signal:c.signal}:{signal:c.signal});return await r.json()}catch{return null}finally{clearTimeout(t)}}
 const setPill=(id,s,t)=>{const e=$(id);e.className="pill "+s;e.lastChild.textContent=t};
 const GO_TXT="Procesar y publicar todo ⚡";
@@ -112,8 +112,8 @@ function setBusy(b){["start","start-up","dock-go"].forEach(i=>$(i).disabled=b);$
 $("sum-8").textContent=b?"En marcha: no hace falta tocar nada":"Todo automático"}
 async function poll(){
 if(!document.hidden){const s=await call("/status");
-if(!s){W.worker=false;W.yt=false;W.running=false;setPill("p-worker","","Worker apagado");setPill("p-yt","","Canal sin conectar");setBusy(false);$("dock-msg").textContent="Worker apagado: ejecutá 2-INSTALAR-Y-EJECUTAR.bat"}
-else{W.worker=true;W.yt=!!s.youtube;W.running=s.running;setPill("p-worker","ok","Worker conectado");
+if(!s){W.fallos=(W.fallos||0)+1;if(W.fallos<3){setTimeout(poll,2500);return}W.worker=false;W.yt=false;W.running=false;setPill("p-worker","","Worker apagado");setPill("p-yt","","Canal sin conectar");setBusy(false);$("dock-msg").textContent="Worker apagado: ejecutá 2-INSTALAR-Y-EJECUTAR.bat"}
+else{W.fallos=0;W.worker=true;W.yt=!!s.youtube;W.running=s.running;setPill("p-worker","ok","Worker conectado");
 setPill("p-yt",s.youtube?"ok":"",s.youtube?"Canal conectado":"Canal sin conectar");
 $("yt-detail").textContent=s.youtube?"":(s.detail||"");pubRender(s.items||[]);if(s.ia)iaTxt(s.ia);$("log").textContent=s.log.length?s.log.join("\n"):"Sin actividad todavía.";$("log").scrollTop=1e9;setBusy(s.running);
 const act=(s.items||[]).find(i=>["processing","uploading"].includes(i.status));
@@ -125,13 +125,15 @@ $("connect").onclick=async()=>{const r=await call("/connect",{});if(!r)return no
 $("yt-detail").textContent=r.message||"Iniciá sesión en YouTube en el Chrome que se abrió.";poll()};
 const go=async upload=>{if(!q.length){openStep(2,true);return note("La cola está vacía: agregá links primero.",1)}
 const r=await call("/start",{config:cfg,items:q,upload,mode:cfg.publish==="schedule"?"schedule":"now",reedit:$("reedit").checked});if(!r)return note("No encuentro el worker. Ejecutá 2-INSTALAR-Y-EJECUTAR.bat.",1);
-note(r.message,!r.ok);if(r.ok)openStep(8,true);poll()};
+note(r.message,!r.ok);if(r.ok){q.forEach(x=>delete x.nuevo);try{localStorage.setItem(K,JSON.stringify(q))}catch{}openStep(8,true)}poll()};
 $("start").onclick=()=>go(false);$("start-up").onclick=()=>go(true);$("dock-go").onclick=()=>go(true);
 poll();
 
 const ST={pending:"En espera",processing:"En proceso",ready:"Editado, listo para subir",uploading:"Subiendo a YouTube",scheduled:"Programado en YouTube",published:"Publicado",error:"Error",cancelled:"Cancelado"};
 const BUSY=["pending","processing","uploading"];
-function pubRender(items){W.items=items;const el=$("pub");$("s-pub").textContent=items.filter(x=>x.status==="published"||x.status==="scheduled").length;
+function quitarCancelados(items){const c=new Set(items.filter(x=>x.status==="cancelled").map(x=>String(x.key||"").split("#")[0]));
+if(!c.size)return;const n=q.length;q=q.filter(x=>!c.has(x.key));if(q.length!==n)save()}
+function pubRender(items){W.items=items;quitarCancelados(items);const el=$("pub");$("s-pub").textContent=items.filter(x=>x.status==="published"||x.status==="scheduled").length;
 const nb=items.filter(x=>BUSY.includes(x.status)).length,nd=items.filter(x=>x.status==="published").length;
 $("sum-9").textContent=items.length?`${items.length} videos · ${nd} publicados${nb?" · "+nb+" en curso":""}`:"Estado de cada video";
 if(!items.length){el.innerHTML='<div class="empty">Todavía no hay videos procesados.</div>';return}
@@ -148,11 +150,11 @@ return `<div class="pc">${x.type==="video"?`<img loading="lazy" src="https://i.y
 $("pub").onclick=async e=>{const b=e.target.closest("[data-act]");if(!b)return;const k=b.dataset.k,a=b.dataset.act;
 if(a==="prev"){const it=W.items.find(y=>y.key===k)||{},id=it.fid||k.split(":")[1].split("#")[0];openWin("Vista previa del video editado",`<video controls autoplay playsinline style="width:100%;max-height:70vh;border-radius:10px;background:#000" src="${API}/media/${encodeURIComponent(id)}_final.mp4"></video><p class="sub">Es el archivo ya editado, tal como se va a subir.</p>`);return}
 if(a==="diag"){verDiag();return}
-if(a==="cancel"){const r=await call("/cancel",{key:k});note(r?r.message:"No encuentro el worker.",!r);poll();return}
+if(a==="cancel"){q=q.filter(x=>x.key!==k.split("#")[0]);save();const r=await call("/cancel",{key:k});note(r?r.message:"No encuentro el worker.",!r);poll();return}
 const r=await call("/upload",{key:k,mode:a==="now"?"now":"schedule",config:cfg});note(r?r.message:"No encuentro el worker.",!r||!r.ok);poll()};
 
 /* ---------- IA ---------- */
-const iaTxt=s=>{["gemini","groq","claude"].forEach(p=>{$("ia-"+p).textContent=s[p]?"clave guardada ✓":"sin clave"});
+const iaTxt=s=>{["gemini","groq","claude"].forEach(p=>{$("ia-"+p).textContent=s[p]?(p==="gemini"&&s.gemini_n>1?s.gemini_n+" claves ✓ ("+s.gemini_libres+" con cuota)":"clave guardada ✓"):"sin clave"});
 if(s.modelo_gemini!==undefined&&document.activeElement!==$("k-modelo"))$("k-modelo").value=s.modelo_gemini||"";
 const m=s.modelo_usado||{};if(m.gemini)$("ia-gemini").textContent="clave guardada ✓ · modelo "+m.gemini;
 $("ia-est").textContent=(s.gemini||s.groq||s.claude)?(s.ultimo?"Última ayuda: "+s.ultimo+".":"Listas."):"Todavía no hay claves."};
@@ -161,7 +163,7 @@ if(a==="save"){const v=$("k-"+p).value.trim();if(!v){m.textContent="Pegá la cla
 if(a==="model"){const r=await call("/ia",{modelo_gemini:$("k-modelo").value.trim()});m.textContent=r?(r.ok===false?r.message:"Modelo guardado."):"No encuentro el worker.";if(r&&r.ia)iaTxt(r.ia)}
 if(a==="del"){const r=await call("/ia",{borrar:p});m.textContent=r?"Clave borrada.":"No encuentro el worker.";if(r&&r.ia)iaTxt(r.ia)}
 if(a==="test"){m.textContent="Probando…";const r=await call("/ia-test",{proveedor:p},90000);m.textContent=r?r.message:"No encuentro el worker.";m.className="msg"+(r&&r.ok?"":" err")}});
-$("cancel-all").onclick=async()=>{if(!confirm("¿Cancelar todo lo que está en proceso?"))return;const r=await call("/cancel",{all:true});note(r?r.message:"No encuentro el worker.",!r);poll()};
+$("cancel-all").onclick=async()=>{if(!confirm("¿Cancelar todo lo que está en proceso?"))return;const busy=W.items.filter(x=>BUSY.includes(x.status)).map(x=>String(x.key||"").split("#")[0]);q=q.filter(x=>!busy.includes(x.key));save();const r=await call("/cancel",{all:true});note(r?r.message:"No encuentro el worker.",!r);poll()};
 document.querySelectorAll(".js-upall").forEach(b=>b.onclick=async()=>{const r=await call("/upload",{key:"ALL",mode:"now",config:cfg});note(r?r.message:"No encuentro el worker.",!r||!r.ok);poll()});
 $("force").onclick=async()=>{const r=await call("/forzar",{});$("yt-detail").textContent=r?r.message:"No encuentro el worker.";poll()};
 
@@ -172,8 +174,8 @@ const c=$("diag-copy");if(c)c.onclick=async()=>{const t=$("diag-txt").textConten
 $("diag-btn").onclick=verDiag;
 
 /* ---------- piloto automático ---------- */
-const PL_K="yutu-piloto",pl=Object.assign({tema:"",shorts:10,videos:3,dias:30,por_video:3},load(PL_K,{}));
-const plIds={tema:"pl-tema",shorts:"pl-shorts",videos:"pl-videos",dias:"pl-dias",por_video:"pl-pv"};
+const PL_K="yutu-piloto",pl=Object.assign({tema:"",shorts:10,videos:3,dias:30,cada:0},load(PL_K,{}));
+const plIds={tema:"pl-tema",shorts:"pl-shorts",videos:"pl-videos",dias:"pl-dias"};
 for(const k in plIds){const el=$(plIds[k]);el.value=pl[k];el.oninput=()=>{pl[k]=el.type==="number"?Math.max(0,+el.value||0):el.value;try{localStorage.setItem(PL_K,JSON.stringify(pl))}catch{}}}
 const plSend=async activo=>{const m=$("pl-msg");if(activo&&!pl.tema.trim()){m.textContent="Escribí un tema central.";m.className="msg err";return}
 const r=await call("/piloto",{...pl,activo,config:cfg},8000);m.className="msg"+(r&&r.ok?"":" err");m.textContent=r?r.message:"No encuentro el worker. Ejecutá 2-INSTALAR-Y-EJECUTAR.bat.";plPoll()};
@@ -220,3 +222,35 @@ $("pi-on").onclick=()=>piSend(true);$("pi-off").onclick=()=>piSend(false);
 async function piPoll(){if(document.hidden)return;const s=await call("/status");if(!s||!s.piloto_ia||!s.piloto_ia.tema)return;const p=s.piloto_ia;
 $("pi-estado").textContent=(p.activo?"🟢 Activo · ":"⏸ En pausa · ")+(p.estado||"Esperando el primer ciclo (hasta 1 min).")}
 setInterval(piPoll,8000);piPoll();
+
+
+/* ---------- piloto de Shorts de YouTube ---------- */
+const YS_K="yutu-piloto-yts",ys=Object.assign({tema:"",por_dia:5,dias:30,cada:0},load(YS_K,{}));
+const ysSave=()=>{try{localStorage.setItem(YS_K,JSON.stringify(ys))}catch{}};
+const ysIds={tema:"ys-tema",por_dia:"ys-dia",dias:"ys-dias"};
+for(const k in ysIds){const el=$(ysIds[k]);el.value=ys[k];el.oninput=()=>{ys[k]=el.type==="number"?Math.max(0,+el.value||0):el.value;ysSave()}}
+const ysSend=async activo=>{const m=$("ys-msg");if(activo&&!ys.tema.trim()){m.textContent="Escribí el tema central.";m.className="msg err";return}
+const r=await call("/piloto-yts",{...ys,activo,config:cfg},8000);m.className="msg"+(r&&r.ok?"":" err");m.textContent=r?r.message:"No encuentro el worker. Ejecutá 2-INSTALAR-Y-EJECUTAR.bat.";tabsPoll()};
+$("ys-on").onclick=()=>ysSend(true);$("ys-off").onclick=()=>ysSend(false);
+
+/* ---------- "cada cuánto" en TODOS los pilotos (0 = automático: reparte el cupo del día) ---------- */
+function cadaCtl(secId,obj,saveFn){const cfgDiv=document.querySelector("#"+secId+" .cfg");if(!cfgDiv)return;
+const min=+obj.cada||0,hrs=min>=60&&min%60===0;
+const lab=document.createElement("label");lab.innerHTML='Subir uno nuevo cada<span class="two"><input type="number" min="0" step="1" placeholder="Auto"><select><option value="m">minutos</option><option value="h">horas</option></select></span>';
+cfgDiv.appendChild(lab);const n=lab.querySelector("input"),u=lab.querySelector("select");u.value=hrs?"h":"m";n.value=min?(hrs?min/60:min):"";
+const upd=()=>{const v=Math.max(0,+n.value||0);obj.cada=Math.round(v*(u.value==="h"?60:1));saveFn()};n.oninput=upd;u.onchange=upd}
+cadaCtl("yts",ys,ysSave);cadaCtl("piloto",pl,()=>{try{localStorage.setItem(PL_K,JSON.stringify(pl))}catch{}});
+cadaCtl("tiktok",tt,()=>{try{localStorage.setItem(TT_K,JSON.stringify(tt))}catch{}});
+cadaCtl("tema-tt",tm,()=>{try{localStorage.setItem(TM_K,JSON.stringify(tm))}catch{}});
+cadaCtl("pia",pi,piSave);
+
+/* ---------- pestañas ---------- */
+const PT=["yts","piloto","tiktok","tema-tt","pia"];let ptSel=load("yutu-ptab","yts");
+function showTab(p){ptSel=PT.includes(p)?p:"yts";try{localStorage.setItem("yutu-ptab",JSON.stringify(ptSel))}catch{}
+PT.forEach(k=>{$(k).classList.toggle("phid",k!==ptSel)});document.querySelectorAll("#ptabs button").forEach(b=>b.classList.toggle("on",b.dataset.p===ptSel))}
+document.querySelectorAll("#ptabs button").forEach(b=>b.onclick=()=>showTab(b.dataset.p));showTab(ptSel);
+async function tabsPoll(){const s=await call("/status");if(!s)return;
+const on={yts:s.piloto_yts,piloto:s.piloto,tiktok:s.tiktok,"tema-tt":s.tema_tt,pia:s.piloto_ia};
+PT.forEach(k=>{const d=$("d-"+k);if(d)d.classList.toggle("act",!!(on[k]&&on[k].activo))});
+const e=s.piloto_yts;if(e&&e.tema)$("ys-estado").textContent=(e.activo?"🟢 Activo · ":"⏸ En pausa · ")+(e.estado||"Buscando el primer Short…")}
+setInterval(()=>{if(!document.hidden)tabsPoll()},8000);tabsPoll();

@@ -1,5 +1,19 @@
 YUTU WORKER (v18)
 
+NOVEDADES v19
+- WORKER ESTABLE: ahora corre bajo un supervisor (si se cae, se levanta solo), el trabajo pesado va con menos prioridad (el panel ya no
+  parece "apagado" mientras se edita), el proceso de edición sobrevive a un reinicio y se retoma donde quedó, y nada queda "procesando" para siempre.
+- CANCELADOS: lo que cancelás ya no se vuelve a cargar al tocar "Comenzar".
+- SUBIDA: leía el panel flotante de OTRAS subidas ("Subiéndose 19 %") y se quedaba esperando para siempre. Ahora mira solo el cuadro de
+  la subida actual: cuando dice "Comprobaciones completadas" toca Siguiente hasta Publicar (y "Publicar de todas formas").
+- TODOS LOS PILOTOS: "Subir uno nuevo cada [minutos/horas]" (vacío = reparte el cupo del día), 1 Short por video fuente (siempre videos
+  distintos), nunca el mismo tramo/segundos de un video (segmentos-usados.json), descripciones sin repetir (descripciones-usadas.json).
+- PILOTO NUEVO "Shorts de YouTube": un Short distinto del tema cada X tiempo.
+- TIKTOK: si yt-dlp no puede leer la cuenta/etiqueta, se lee con el Chrome del worker (y se guardan sus cookies para descargar).
+- PLAYLISTS: paso 7 -> "publicar uno cada X minutos".
+- GEMINI: podés pegar VARIAS claves; cuando una se queda sin cuota pasa sola a la siguiente.
+- Web ordenada: pilotos en pestañas con un punto verde si están activos.
+
 NOVEDADES v18
 - PILOTOS TIKTOK ARREGLADOS: la IA les devolvia un formato incompatible y los dos se quedaban sin hacer nada. Ahora leen TikTok
   haciéndose pasar por Chrome (curl_cffi) y, si TikTok bloquea, el piloto por tema sigue con Shorts de YouTube del mismo tema.

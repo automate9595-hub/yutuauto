@@ -25,6 +25,7 @@ def py_exe():
 def stop_all():
     try:
         if PROC and PROC.poll() is None: PROC.terminate()
+        RUNF.unlink(missing_ok=True)                         # salida voluntaria: no se retoma sola
     except Exception: pass
 
 def chrome_path():
@@ -123,25 +124,91 @@ def merge_queue(data, reedit=False):
                 if p.get("status") in keep: items.append(p)
                 else:                                                                       # esa parte se vuelve a procesar desde cero
                     items.append(dict({k: p[k] for k in ("type", "id", "key", "kind", "url", "part", "parts", "split_start", "split_base") if k in p}, status="pending"))
-        else: items.append(old[i["key"]] if i.get("key") in old and old[i["key"]].get("status") in keep else i)
+        else:
+            o = old.get(i.get("key"))
+            if o and o.get("status") == "cancelled" and not i.get("nuevo"): items.append(o)              # lo cancelado NO se vuelve a cargar solo
+            else:
+                if o and o.get("status") in keep: items.append(o)
+                else: items.append({k: v for k, v in i.items() if k != "nuevo"})
+    web = {str(i.get("key", "")).split("#")[0] for i in data["items"]}
+    for k, o in old.items():                                  # lo que ya estaba en la cola del worker (pilotos, ya publicados) no se pierde
+        if k.split("#")[0] not in web and (o.get("status") in ("ready", "scheduled", "published") or (o.get("auto") and o.get("status") in ("pending", "processing"))):
+            items.append(o)
     write_queue({"config": data.get("config", {}), "items": items})
 
-def run_job(extra):
-    global PROC
-    state["running"] = True; log("== Comenzando proceso ==")
-    try:
-        PROC = subprocess.Popen([py_exe(), "-u", "yutu.py"] + extra, cwd=ROOT, env=ENV,
-                                stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding="utf-8", errors="replace",
-                                creationflags=NOWIN)
-        for line in PROC.stdout: log(line)
-        PROC.wait()
-    except Exception as e:
-        log(f"ERROR: {e}")
+RUNF = ROOT / "running.json"; JOBLOG = ROOT / "job.log"; CRASHF = ROOT / "crash.json"
+BAJA = getattr(subprocess, "BELOW_NORMAL_PRIORITY_CLASS", 0)        # el trabajo pesado va con menos prioridad: el panel siempre responde
+
+def job_vivo():
+    """True si el proceso de edición está vivo (latido reciente), aunque este servidor se haya reiniciado."""
+    try: return time.time() - json.loads(RUNF.read_text("utf-8")).get("t", 0) < 25
+    except Exception: return False
+
+def _seguir(pos, proc=None):
+    """Lee job.log mientras el proceso viva. El proceso escribe a un ARCHIVO (no a una tubería), así sobrevive a un reinicio del worker."""
+    t_fin = None
+    while True:
+        try:
+            with open(JOBLOG, "r", encoding="utf-8", errors="replace") as f:
+                f.seek(pos)
+                for line in f: log(line)
+                pos = f.tell()
+        except Exception: pass
+        vivo = (proc.poll() is None) if proc is not None else job_vivo()
+        if not vivo:
+            t_fin = t_fin or time.time()
+            if time.time() - t_fin > 1.5: break
+        time.sleep(0.6)
+
+def _fin_job():
     state["running"] = False; log("== Proceso terminado ==")
     try: (ROOT / "cancel.json").unlink()
     except Exception: pass
     try: NOTIFY("Yutu Worker", "Proceso terminado. Revisa el panel.")
     except Exception: pass
+
+def run_job(extra):
+    global PROC
+    state["running"] = True; log("== Comenzando proceso ==")
+    try:
+        if JOBLOG.exists() and JOBLOG.stat().st_size > 5_000_000: JOBLOG.unlink()
+        pos = JOBLOG.stat().st_size if JOBLOG.exists() else 0
+        fh = open(JOBLOG, "a", encoding="utf-8", buffering=1)
+        PROC = subprocess.Popen([py_exe(), "-u", "yutu.py"] + extra, cwd=ROOT, env=ENV, stdout=fh, stderr=subprocess.STDOUT,
+                                creationflags=NOWIN | BAJA)
+        _seguir(pos, PROC)
+        fh.close()
+    except Exception as e:
+        log(f"ERROR: {e}")
+    _fin_job()
+
+def _crashes_recientes():
+    try: c = [t for t in json.loads(CRASHF.read_text("utf-8")) if time.time() - t < 900]
+    except Exception: c = []
+    return c
+
+def recuperar():
+    """Al arrancar el worker: si había un proceso a medias, lo retoma (o lo sigue mirando si sigue vivo) y arregla los videos que quedaron colgados."""
+    try: info = json.loads(RUNF.read_text("utf-8"))
+    except Exception: return
+    if job_vivo():
+        state["running"] = True; log("Había un proceso en marcha: lo sigo mirando.")
+        pos = JOBLOG.stat().st_size if JOBLOG.exists() else 0
+        threading.Thread(target=lambda: (_seguir(pos), _fin_job()), daemon=True).start(); return
+    c = _crashes_recientes()
+    d = read_queue()
+    if d:                                                       # nada queda "procesando" para siempre
+        for i in d.get("items", []):
+            if i.get("status") == "processing": i["status"] = "pending"
+            elif i.get("status") == "uploading" and i.get("file"): i["status"] = "ready"; i["reanudar"] = True; i["reanudar_en"] = 0
+        write_queue(d)
+    try: RUNF.unlink()
+    except Exception: pass
+    if len(c) >= 3: log("El proceso se cortó 3 veces en 15 min: no lo relanzo solo. Revisá job.log."); return
+    c.append(time.time()); CRASHF.write_text(json.dumps(c), "utf-8")
+    args = info.get("args") or ["--modo", "now"]
+    log("El proceso se había cortado: lo retomo solo donde quedó.")
+    threading.Thread(target=run_job, args=(args,), daemon=True).start()
 
 class H(BaseHTTPRequestHandler):
     def log_message(self, *a): pass
@@ -202,7 +269,8 @@ class H(BaseHTTPRequestHandler):
         self._send({"ok": True, **state, "log": LOG[-40:], "items": queue_items(), "ia": ia.estado(), "piloto": {k: v for k, v in piloto.leer().items() if k not in ("usados", "config")},
                                "tiktok": {k: v for k, v in piloto.leer_tt().items() if k not in ("usados", "rechazados", "lista")},
                                "tema_tt": {k: v for k, v in piloto.leer_tm().items() if k not in ("usados", "rechazados", "cache", "muertas", "hist")},
-                               "piloto_ia": {k: v for k, v in generador.leer().items() if k not in ("ideas", "hist")}})
+                               "piloto_ia": {k: v for k, v in generador.leer().items() if k not in ("ideas", "hist")},
+                               "piloto_yts": {k: v for k, v in piloto.leer_ys().items() if k not in ("usados", "hist")}})
     def do_POST(self):
         if self._bad_origin(): return self._send({"ok": False}, 403)
         n = int(self.headers.get("Content-Length") or 0); data = json.loads(self.rfile.read(n) or b"{}")
@@ -237,6 +305,7 @@ class H(BaseHTTPRequestHandler):
                 if data.get("config"): p["config"] = data["config"]; piloto.guardar(p)
             except Exception as e: return self._send({"ok": False, "message": "Datos inválidos: " + str(e)})
             log("Piloto automático " + ("ACTIVADO" if p["activo"] else "pausado") + f": «{p['tema']}» · {p['shorts']} Shorts + {p['videos']} Videos al día · {p['dias']} días")
+            if p["activo"]: kick()
             return self._send({"ok": True, "message": "Piloto activado." if p["activo"] else "Piloto en pausa.", "piloto": {k: v for k, v in p.items() if k not in ("usados", "config")}})
         if self.path == "/piloto-tiktok":
             try:
@@ -245,6 +314,7 @@ class H(BaseHTTPRequestHandler):
                 if data.get("config"): p["config"] = data["config"]; piloto.guardar_tt(p)
             except Exception as e: return self._send({"ok": False, "message": "Datos inválidos: " + str(e)})
             log("Piloto TikTok " + ("ACTIVADO" if p["activo"] else "pausado") + f": {p['cuenta']} · {p['por_dia']}/día · {p['orden']} · {p['dias']} días")
+            if p["activo"]: kick()
             return self._send({"ok": True, "message": "Piloto TikTok activado." if p["activo"] else "Piloto TikTok en pausa."})
         if self.path == "/piloto-tema-tiktok":
             try:
@@ -253,7 +323,17 @@ class H(BaseHTTPRequestHandler):
                 if data.get("config"): p["config"] = data["config"]; piloto.guardar_tm(p)
             except Exception as e: return self._send({"ok": False, "message": "Datos inválidos: " + str(e)})
             log("Piloto TikTok por tema " + ("ACTIVADO" if p["activo"] else "pausado") + f": «{p['tema']}» · {p['shorts']} Shorts + {p['videos']} Videos/día · {p['dias']} días")
+            if p["activo"]: kick()
             return self._send({"ok": True, "message": "Piloto activado." if p["activo"] else "Piloto en pausa."})
+        if self.path == "/piloto-yts":              # piloto de Shorts de YouTube
+            try:
+                p = piloto.configurar_ys(data)
+                if p["activo"] and not p["tema"]: p["activo"] = False; piloto.guardar_ys(p); return self._send({"ok": False, "message": "Escribí el tema central."})
+                if data.get("config"): p["config"] = data["config"]; piloto.guardar_ys(p)
+            except Exception as e: return self._send({"ok": False, "message": "Datos inválidos: " + str(e)})
+            log("Piloto YouTube Shorts " + ("ACTIVADO" if p["activo"] else "pausado") + f": «{p['tema']}» · {p['por_dia']} por día · cada {p['cada'] or 'auto'} min")
+            if p["activo"]: kick()
+            return self._send({"ok": True, "message": "Piloto de Shorts activado: busca el primero ahora." if p["activo"] else "Piloto de Shorts en pausa."})
         if self.path == "/piloto-ia":               # piloto creador: IA crea los Shorts desde cero
             try:
                 p = generador.configurar(data)
@@ -261,6 +341,7 @@ class H(BaseHTTPRequestHandler):
                 if data.get("config"): p["config"] = data["config"]; generador.guardar(p)
             except Exception as e: return self._send({"ok": False, "message": "Datos inválidos: " + str(e)})
             log("Piloto IA creador " + ("ACTIVADO" if p["activo"] else "pausado") + f": «{p['tema']}» · {p['shorts']} Shorts/día · {', '.join(p['idiomas'])} · {p['dias']} días")
+            if p["activo"]: kick()
             return self._send({"ok": True, "message": "Piloto creador activado." if p["activo"] else "Piloto creador en pausa."})
         if self.path == "/cancel":
             request_cancel(data.get("key"), bool(data.get("all")))
@@ -284,11 +365,12 @@ class H(BaseHTTPRequestHandler):
 MAX_AUTO = 8
 def _piloto_tick():
     """Si algún piloto (búsqueda o TikTok) está activo y toca el siguiente video del día: lo agrega a la cola y lanza todo el proceso."""
-    pa, pt, pm, pg = piloto.leer(), piloto.leer_tt(), piloto.leer_tm(), generador.leer()
-    if not (pa.get("activo") or pt.get("activo") or pm.get("activo") or pg.get("activo")): return
+    pa, pt, pm, pg, py = piloto.leer(), piloto.leer_tt(), piloto.leer_tm(), generador.leer(), piloto.leer_ys()
+    if not (pa.get("activo") or pt.get("activo") or pm.get("activo") or pg.get("activo") or py.get("activo")): return
+    if (pt.get("activo") or pm.get("activo")): launch_chrome()          # TikTok se lee con el Chrome del worker
     d = read_queue() or {"config": pa.get("config") or pt.get("config") or pm.get("config") or pg.get("config") or {}, "items": []}
     nuevos = []
-    for act, fn, nom in ((pa.get("activo"), piloto.tick, "Piloto"), (pt.get("activo"), piloto.tick_tt, "Piloto TikTok"), (pm.get("activo"), piloto.tick_tm, "Piloto TikTok tema")):
+    for act, fn, nom in ((pa.get("activo"), piloto.tick, "Piloto"), (pt.get("activo"), piloto.tick_tt, "Piloto TikTok"), (pm.get("activo"), piloto.tick_tm, "Piloto TikTok tema"), (py.get("activo"), piloto.tick_ys, "Piloto YouTube Shorts")):
         if act:
             try: nuevos += fn(d.get("items", []) + nuevos, log)
             except Exception as e: log(f"{nom}: error {str(e)[:100]} (sigo con los demás)")
@@ -302,6 +384,16 @@ def _piloto_tick():
     try: (ROOT / "cancel.json").unlink()
     except Exception: pass
     threading.Thread(target=run_job, args=(["--modo", "now"],), daemon=True).start()
+
+_KL = threading.Lock()
+def kick():
+    """Al activar un piloto: busca el primer video YA, sin esperar el siguiente minuto del vigilante."""
+    def _t():
+        if state["running"] or not _KL.acquire(False): return
+        try: _piloto_tick()
+        except Exception as e: log(f"Piloto: {str(e)[:100]}")
+        finally: _KL.release()
+    threading.Thread(target=_t, daemon=True).start()
 
 def vigilante():
     """Cada minuto: si una subida quedó cortada (marcada 'reanudar') y no hay nada en marcha, la retoma sola, sin que toques nada."""
@@ -323,8 +415,19 @@ def vigilante():
         except Exception as e: log(f"Vigilante: {e}")
 
 def serve():
-    threading.Thread(target=vigilante, daemon=True).start()
-    ThreadingHTTPServer(("127.0.0.1", 8765), H).serve_forever()
+    """Servidor a prueba de caidas: si algo lo tumba, se levanta de nuevo solo (y el vigilante igual)."""
+    try: recuperar()
+    except Exception as e: log(f"recuperar: {e}")
+    def vig():
+        while True:
+            try: vigilante()
+            except Exception as e: log(f"Vigilante reiniciado ({str(e)[:80]})"); time.sleep(5)
+    threading.Thread(target=vig, daemon=True).start()
+    while True:
+        try:
+            srv = ThreadingHTTPServer(("127.0.0.1", 8765), H); srv.daemon_threads = True; srv.serve_forever()
+        except Exception as e:
+            log(f"Servidor reiniciado ({str(e)[:80]})"); time.sleep(2)
 
 if __name__ == "__main__":
     print("Worker listo en http://127.0.0.1:8765 - vuelve a la web y usa los botones.")

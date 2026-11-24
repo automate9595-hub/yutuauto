@@ -19,10 +19,34 @@ def busy():
 if busy():                       # ya esta corriendo: solo abre el panel
     webbrowser.open(URL); sys.exit(0)
 
+# ---- SUPERVISOR: el worker real corre como proceso hijo; si se cae por cualquier motivo, se vuelve a levantar solo.
+if os.environ.get("YUTU_HIJO") != "1":
+    import subprocess
+    CREAR = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+    caidas = []
+    while True:
+        t0 = time.time()
+        hijo = subprocess.Popen([sys.executable, str(pathlib.Path(__file__))], cwd=ROOT, env=dict(os.environ, YUTU_HIJO="1", YUTU_REINICIO="1" if caidas else "0"), creationflags=CREAR)
+        rc = hijo.wait()
+        if rc == 0: sys.exit(0)                                   # "Salir del worker": termina de verdad
+        print(time.strftime("%Y-%m-%d %H:%M:%S"), f"El worker se cayó (código {rc}); lo levanto de nuevo.")
+        caidas = [x for x in caidas if time.time() - x < 600] + [time.time()]
+        time.sleep(3 if len(caidas) < 5 else 60)                  # si se cae sin parar, espera más para no saturar la PC
+
+import faulthandler, traceback
+try: faulthandler.enable(file=sys.stdout)
+except Exception: pass
+def _hook(t, v, tb): print("ERROR no capturado:", "".join(traceback.format_exception(t, v, tb))[-1500:], flush=True)
+sys.excepthook = _hook
+threading.excepthook = lambda a: _hook(a.exc_type, a.exc_value, a.exc_traceback)
 import servidor
-threading.Thread(target=servidor.serve, daemon=True).start()
+def _servir():
+    while True:
+        try: servidor.serve()
+        except BaseException as e: print("serve() terminó:", e, flush=True); time.sleep(2)
+threading.Thread(target=_servir, daemon=True).start()
 print(time.strftime("%Y-%m-%d %H:%M:%S"), "Worker iniciado")
-webbrowser.open(URL)
+if os.environ.get("YUTU_REINICIO") != "1": webbrowser.open(URL)      # tras una caída no se vuelve a abrir el navegador
 
 try:
     import pystray

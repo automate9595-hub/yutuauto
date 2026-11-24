@@ -12,6 +12,8 @@ KF = ROOT / "claves-ia.json"
 TIMEOUT = 30
 NOMBRE = {"gemini": "Gemini", "groq": "Groq", "claude": "Claude"}
 CICLO = ["gemini", "groq", "claude"]
+PATRON = ["gemini", "groq", "gemini", "claude", "gemini"]
+_TURNO = [0]
 _groq_modelos = [None]
 _gem_modelos = [None]
 USADO = {}          # ultimo modelo que respondio, por proveedor (para mostrarlo en la web)
@@ -27,17 +29,26 @@ def guardar(d):
 
 def estado():
     d = cargar()
-    return {"gemini": bool(d.get("gemini")), "groq": bool(d.get("groq")), "claude": bool(d.get("claude")), "ultimo": NOMBRE.get(d.get("ultimo"), ""),
+    ks = _claves_gemini(d)
+    return {"gemini_n": len(ks), "gemini_libres": sum(1 for k in ks if _GK.get(k, 0) < time.time()), "gemini": bool(d.get("gemini")), "groq": bool(d.get("groq")), "claude": bool(d.get("claude")), "ultimo": NOMBRE.get(d.get("ultimo"), ""),
             "modelo_gemini": d.get("modelo_gemini", ""), "modelo_usado": dict(USADO)}
 
 def set_claves(data):
     d = cargar()
-    for p in CICLO:
+    gv = str(data.get("gemini") or "").strip()
+    if gv:                                           # Gemini acepta VARIAS claves (una por línea): se van turnando cuando una se queda sin cuota
+        nuevas = [k for k in re.split(r"[\s,;]+", gv) if k]
+        if any(len(k) > 300 for k in nuevas): raise ValueError("Una clave no parece válida.")
+        ks = _claves_gemini(d) + [k for k in nuevas if k not in _claves_gemini(d)]
+        d["gemini"] = ks[0]; d["gemini_extra"] = ks[1:]
+    for p in [x for x in CICLO if x != "gemini"]:
         v = str(data.get(p) or "").strip()
         if v:
             if len(v) > 300 or re.search(r"\s", v): raise ValueError("La clave no parece válida (tiene espacios).")
             d[p] = v
-    if data.get("borrar") in CICLO: d.pop(data["borrar"], None)
+    if data.get("borrar") in CICLO:
+        d.pop(data["borrar"], None)
+        if data["borrar"] == "gemini": d.pop("gemini_extra", None)
     if "modelo_gemini" in data:                      # "" = automatico (el Flash Lite mas nuevo)
         m = str(data.get("modelo_gemini") or "").strip().removeprefix("models/")
         if m and not re.fullmatch(r"[\w.\-]{3,80}", m): raise ValueError("El nombre del modelo no parece válido (ej: gemini-flash-lite-latest).")
@@ -90,7 +101,31 @@ def _modelos_gemini(d):
     _gem_modelos[0] = lista
     return lista
 
+_GK = {}            # clave de Gemini -> hasta cuando descansa (sin cuota)
+_GKI = [0]
+
+def _claves_gemini(d):
+    ks = [d.get("gemini")] + list(d.get("gemini_extra") or [])
+    return [k for k in dict.fromkeys(ks) if k]
+
 def _gemini(prompt, d):
+    """Varias claves: se usan por turnos y, si una se queda sin cuota (o es inválida), pasa sola a la siguiente."""
+    ks = _claves_gemini(d); ult = None
+    libres = [k for k in ks if _GK.get(k, 0) < time.time()]
+    if libres: n = _GKI[0] % len(libres); libres = libres[n:] + libres[:n]; _GKI[0] += 1
+    for i, k in enumerate(libres):
+        try: return _gemini_una(prompt, dict(d, gemini=k))
+        except RuntimeError as e:
+            m = str(e); ult = e
+            if re.search(r"HTTP (429|403)|RESOURCE_EXHAUSTED|quota|exceeded", m, re.I):
+                _GK[k] = time.time() + (6 * 3600 if re.search(r"per ?day|daily|PerDay", m, re.I) else 120)
+                print(f"  IA Gemini: la clave {ks.index(k) + 1} de {len(ks)} se quedó sin cuota; paso a la siguiente.")
+            elif re.search(r"HTTP (400|401)", m) and re.search(r"API key|key not valid|invalid", m, re.I):
+                _GK[k] = time.time() + 24 * 3600; print(f"  IA Gemini: la clave {ks.index(k) + 1} no es válida; la salto.")
+            else: raise
+    raise ult or RuntimeError("HTTP 429 Todas las claves de Gemini están sin cuota por ahora.")
+
+def _gemini_una(prompt, d):
     cuerpo = {"contents": [{"role": "user", "parts": [{"text": prompt}]}],
               "generationConfig": {"temperature": 0.4, "responseMimeType": "application/json"}}
     hdr = {"x-goog-api-key": d["gemini"]}; ultimo = RuntimeError("Gemini no respondió"); t0 = time.time()
@@ -192,8 +227,9 @@ def _orden(modo, d):
     if modo.endswith("_primero"):
         p0 = modo[:-8]; base = [p0] + [p for p in CICLO if p != p0]       # el elegido y luego los demas de respaldo
     else:                                                                  # alternar: sigue el turno, los demas de respaldo
-        ult = d.get("ultimo"); i = (CICLO.index(ult) + 1) % len(CICLO) if ult in CICLO else 0
-        base = CICLO[i:] + CICLO[:i]
+        # alternar CON PRIORIDAD A GEMINI: de cada 5 pedidos, 3 empiezan en Gemini, 1 en Groq y 1 en Claude (los demas siempre de respaldo)
+        p0 = PATRON[_TURNO[0] % len(PATRON)]; _TURNO[0] += 1
+        base = [p0] + [p for p in CICLO if p != p0]
     return [p for p in base if p in tiene]
 
 def pedir(prompt, modo="alternar"):
@@ -283,13 +319,15 @@ Responde SOLO este JSON: {{"fx_list": ["id", ...], "fx_mode": "seq|overlap|rando
                 "motivo": str(data.get("motivo", ""))[:120]}
     except Exception: return None
 
-def textos(modo, titulo, texto, kind, prohibidos=(), idioma=""):
+def textos(modo, titulo, texto, kind, prohibidos=(), idioma="", descs=()):
     """Titulo y descripcion NUEVOS: nunca iguales al original ni a los ya usados (lista 'prohibidos')."""
     pro = "\n".join("- " + str(x)[:100] for x in list(prohibidos)[-40:]) or "(ninguno)"
     data, p = pedir(f'''Eres editor de YouTube. Escribe un título y una descripción para este {"Short" if kind == "short" else "video"}.
 Título original (NO lo copies ni lo parafrasees de cerca): "{titulo}". Contenido (extracto): {texto[:1500] or "(sin texto)"}
 Títulos que YA se usaron (el tuyo debe ser claramente distinto de todos, con otro gancho y otras palabras clave):
 {pro}
+Descripciones que YA se usaron (la tuya NO puede repetir sus frases ni su estructura; escribe otra distinta basada en este clip):
+{chr(10).join("- " + str(x)[:120].replace(chr(10), " ") for x in list(descs)[-12:]) or "(ninguna)"}
 Reglas: {("idioma: " + idioma + ".") if idioma else "mismo idioma del contenido."} Título atractivo de máximo 90 caracteres basado en lo que PASA en este clip, sin mentiras ni promesas falsas, sin inventar datos; descripción de 2 a 3 frases y 3 a 5 hashtags al final.
 Responde SOLO este JSON: {{"titulo": "...", "descripcion": "..."}}''', modo)
     try:

@@ -38,7 +38,9 @@ def sembrar(items):
     """Al arrancar: los titulos de lo que ya esta en la cola cuentan como usados."""
     for i in items:
         t = i.get("final_title") or i.get("ia_title")
-        if t and i.get("status") in ("published", "scheduled", "uploading", "ready"): registrar(t)
+        if t and i.get("status") in ("published", "scheduled", "uploading", "ready"):
+            registrar(t)
+            if i.get("ia_desc"): registrar_desc(i["ia_desc"])
 
 def fallback(texto, tema, prohibidos, n=1):
     """Ultimo recurso sin IA: arma un titulo a partir de lo que se dice en el clip (no del titulo copiado)."""
@@ -52,3 +54,39 @@ def fallback(texto, tema, prohibidos, n=1):
         c = f"{(cand[1] if len(cand) > 1 else 'Clip')} #{k}"
         if not repetido(c, prohibidos): return c[:95]
         k += 1
+
+
+# ---------------- descripciones: tampoco se repiten ----------------
+DF = ROOT / "descripciones-usadas.json"
+
+def _sin_tags(t):
+    return re.sub(r"#\w+", " ", str(t or ""))
+
+def descripciones_usadas():
+    try: return json.loads(DF.read_text("utf-8")).get("usadas", [])
+    except Exception: return []
+
+def desc_repetida(desc, otras):
+    """Igual o muy parecida (sin contar hashtags) a otra ya usada."""
+    return any(parecido(_sin_tags(desc), _sin_tags(x)) for x in otras if _sin_tags(x).strip()) if _sin_tags(desc).strip() else False
+
+def registrar_desc(desc):
+    with _L:
+        u = descripciones_usadas()
+        if not desc_repetida(desc, u):
+            u = (u + [str(desc)[:600]])[-1500:]
+            tmp = DF.with_suffix(".tmp"); tmp.write_text(json.dumps({"usadas": u}, ensure_ascii=False, indent=1), "utf-8"); os.replace(tmp, DF)
+
+def desc_fallback(titulo, texto, tema, otras, k=1):
+    """Descripcion propia y unica armada con el titulo y lo que se dice en el clip."""
+    frases = [f.strip() for f in re.split(r"(?<=[.!?])\s+", re.sub(r"\s+", " ", str(texto or ""))) if len(f.strip()) > 12]
+    base = (" ".join(frases[:2])[:230] + "\n\n") if frases else ""
+    tag = re.sub(r"[^\w]", "", str(tema or "").title()) or "Viral"
+    cand = [f"{titulo}\n\n{base}#{tag} #shorts", f"{base}{titulo} · mira hasta el final.\n\n#{tag} #shorts #viral"]
+    for c in cand:
+        if not desc_repetida(c, otras): return c.strip()
+    n = k
+    while True:
+        c = f"{titulo}\n\n{base}Parte {n} · #{tag} #shorts"
+        if not desc_repetida(c, otras): return c.strip()
+        n += 1

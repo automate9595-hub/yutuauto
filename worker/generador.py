@@ -40,7 +40,7 @@ def configurar(d):
     tema = str(d.get("tema", p.get("tema", ""))).strip()[:140]
     if tema != p.get("tema"): p.update(ideas=[], inicio=None, hoy={})
     p.update(activo=bool(d.get("activo")), tema=tema, shorts=max(1, min(int(d.get("shorts", 5)), 40)), dias=max(1, min(int(d.get("dias", 30)), 365)),
-             idiomas=idiomas, duracion=max(20, min(int(d.get("duracion", 45)), 58)),
+             idiomas=idiomas, cada=max(0, min(int(d.get("cada", 0) or 0), 1440)), duracion=max(20, min(int(d.get("duracion", 45)), 58)),
              voz=d.get("voz") if d.get("voz") in ("hombre", "mujer", "alternar") else "alternar", estilo=str(d.get("estilo", p.get("estilo", "")))[:160])
     if p["activo"] and not p.get("inicio"): p["inicio"] = hoy
     for k in ("ideas", "hist"): p.setdefault(k, [])
@@ -61,7 +61,7 @@ def tick(items_existentes, log=print):
     p["hoy"] = h
     if h["n"] >= p["shorts"]: p["estado"] = f"Día {dia}/{p['dias']}: cupo de hoy completo ({h['n']}/{p['shorts']})."; guardar(p); return []
     if sum(1 for i in items_existentes if i.get("type") == "gen" and i.get("status") in ("pending", "processing")) >= 2: return []     # no acumular trabajo
-    gap = max(4 * 60, (15 * 3600) // p["shorts"])
+    gap = p["cada"] * 60 if p.get("cada") else max(4 * 60, (15 * 3600) // p["shorts"])
     if time.time() - h["ultimo"] < gap: p["estado"] = f"Día {dia}/{p['dias']}: {h['n']}/{p['shorts']} creados hoy."; guardar(p); return []
     idi = p["idiomas"][len(p.get("hist", [])) % len(p["idiomas"])]
     vid = hashlib.sha1(f"{time.time()}{random.random()}".encode()).hexdigest()[:11]

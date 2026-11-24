@@ -84,13 +84,17 @@ def expand(d):
         if it["key"] not in seen: seen.add(it["key"]); res.append(it)
     d["items"] = res
 
-def _imp():
-    try: import curl_cffi; return ["--impersonate", "chrome"]
-    except Exception: return []
+def _imp(url=""):
+    a = []
+    try: import curl_cffi; a = ["--impersonate", "chrome"]
+    except Exception: pass
+    ck = ROOT / "tiktok-cookies.txt"
+    if "tiktok.com" in str(url) and ck.exists(): a += ["--cookies", str(ck)]          # sesión del Chrome del worker: TikTok no bloquea la descarga
+    return a
 
 def download(it, src, cb=None):
     cb = cb or (lambda f: set_prog(it, "dl", f))
-    cmd = [sys.executable, "-m", "yt_dlp", "--newline", "-N", "4", "--retries", "5", "--fragment-retries", "5", "--no-mtime"] + _imp() + [ "--progress-template", "download:[DL] %(progress._percent_str)s",
+    cmd = [sys.executable, "-m", "yt_dlp", "--newline", "-N", "4", "--retries", "5", "--fragment-retries", "5", "--no-mtime"] + _imp(it.get("url")) + [ "--progress-template", "download:[DL] %(progress._percent_str)s",
            "--ffmpeg-location", FFMPEG, "-f", "bv*[height<=1080][ext=mp4]+ba[ext=m4a]/bv*[height<=1080]+ba/b",
            "--merge-output-format", "mp4", "--no-playlist", "-o", str(MEDIA / f"{it['id']}.%(ext)s"), it["url"]]
     p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding="utf-8", errors="replace")
@@ -112,7 +116,7 @@ PRE_SEM = threading.Semaphore(2)        # como mucho 2 videos descargados por ad
 _REL = set()
 
 def info_video(it):
-    r = ytdlp("-j", "--no-playlist", *_imp(), it["url"], capture_output=True, text=True)
+    r = ytdlp("-j", "--no-playlist", *_imp(it["url"]), it["url"], capture_output=True, text=True)
     return json.loads(r.stdout)
 
 def prefetch(items):
@@ -140,6 +144,27 @@ def esperar_pre(it):
     while vid in PRE_PEND:
         check_cancel(it); set_prog(it, "dl", DLP.get(vid, 0.0)); time.sleep(0.4)
     return PRE_INFO.get(vid)
+
+SEGF = ROOT / "segmentos-usados.json"; _SGL = threading.Lock()
+
+def seg_leer():
+    try: return json.loads(SEGF.read_text("utf-8"))
+    except Exception: return {}
+
+def seg_libre(vid, mia, a, L, dur, margen=0.5):
+    """Inicio (cerca de 'a') de un tramo de L s que NO pise ningún segundo ya usado de este video en otro Short. None si no queda ninguno."""
+    usados = [r for f, r in seg_leer().get(vid, {}).items() if f != mia]
+    choca = lambda s: any(s < r[1] + margen and s + L > r[0] - margen for r in usados)
+    if not choca(a): return a
+    for d in range(1, int(dur) + 1):
+        for s in (a - d, a + d):
+            if 0 <= s <= dur - L and not choca(s): return float(s)
+    return None
+
+def seg_registrar(vid, mia, a, L):
+    with _SGL:
+        d = seg_leer(); d.setdefault(vid, {})[mia] = [round(a, 2), round(a + L, 2)]
+        tmp = SEGF.with_suffix(".tmp"); tmp.write_text(json.dumps(d), "utf-8"); os.replace(tmp, SEGF)
 
 def srt_time(s):
     h, m, sec = int(s // 3600), int(s % 3600 // 60), s % 60
@@ -369,6 +394,10 @@ def process(it, cfg):
             except Cancelled: raise
             except Exception as e: print("  [IA] No se pudo analizar:", str(e)[:150])
         set_prog(it, "ia", 1.0, True)
+    if short:                                  # nunca la misma parte (ni los mismos segundos) de un video en dos Shorts
+        ns = seg_libre(vid, fid(it), start, L, dur)
+        if ns is None: raise RuntimeError("Ya se usaron todas las partes de este video: no queda un tramo distinto para otro Short.")
+        if abs(ns - start) > 0.01: print(f"  Ese tramo ya se usó en otro Short; tomo otro distinto desde {ns:.0f}s."); start = ns
     print(f"  Tramo: {start:.0f}s -> {start + L:.0f}s ({L:.0f}s de {dur:.0f}s)")
     srt = None
     if cfg.get("sub", True):
@@ -415,6 +444,7 @@ def process(it, cfg):
         th_txt.join(120); r = res_txt.get("r")
         if r: it["ia_title"], it["ia_desc"] = r["titulo"], r["descripcion"]; ayuda.append("título " + r["prov"]); print(f"  [IA {r['prov']}] Título: {r['titulo']}")
     it["ia"] = " · ".join(ayuda)
+    if short: seg_registrar(vid, fid(it), start, L)
     it["file"] = str(final); it["status"] = "ready"
     if not PLAN.get("up", (0, 0))[1]: it["pct"] = 100; it["stage"] = "Listo"
     save(D)
@@ -594,9 +624,20 @@ RE_PIE_COMP = re.compile(r"comprobando|checking", re.I)
 RE_PIE_PROC = re.compile(r"procesando|processing", re.I)
 RE_PIE_OK = re.compile(r"comprobaciones completadas|checks complete|no se han encontrado problemas|no issues found|se han encontrado|found (?:an? )?(?:issue|copyright)|infracci|may restrict|podr[ií]a", re.I)
 
+JS_PIE = r"""(function(){var d=window.__D('ytcp-uploads-dialog');if(!d)return '';var e=window.__A('ytcp-video-upload-progress',d)[0]||window.__D('.left-button-area',d)||window.__D('#footer',d);return e?(e.innerText||''):''})()"""
+JS_OKDLG = r"""(function(){var d=window.__D('ytcp-uploads-dialog');if(!d)return false;return /comprobaciones completadas|no se han encontrado problemas|checks complete|no issues found/i.test(d.innerText||'')})()"""
+
+def texto_pie(tab):
+    """SOLO el pie del cuadro de subida actual (no el panel flotante, que muestra OTRAS subidas, p. ej. 'Subiéndose 19 %')."""
+    try: return (tab.eval(JS_PIE) or "").replace("\n", " ")
+    except Exception: return ""
+
 def estado_pie(tab):
     """Que dice Studio abajo a la izquierda del cuadro de subida: 'subiendo' -> 'procesando'/'comprobando' -> 'listo'."""
-    t = (texto_progreso(tab) or "").replace("\n", " ")
+    try:
+        if tab.eval(JS_OKDLG): return "listo", "Comprobaciones completadas"
+    except Exception: pass
+    t = texto_pie(tab)
     if RE_PIE_SUBE.search(t): return "subiendo", t
     if RE_PIE_COMP.search(t): return "comprobando", t
     if RE_PIE_PROC.search(t): return "procesando", t
@@ -712,9 +753,20 @@ def textos_para_subir(it, cfg):
         tema = (cfg or {}).get("tema_titulo", "") or ("Mobile Legends" if "mobile legends" in (original + " " + texto).lower() else "")
         t = titulos.fallback(texto, tema, prohibidos, len(titulos.usados()) + 1)
         print("  Título propio (sin IA disponible):", t)
-    if not desc: desc = (texto[:160] + "…\n\n" if texto else "") + "#viral #shorts"
+    otras = titulos.descripciones_usadas() + [i.get("ia_desc") for i in (D["items"] if D else []) if i is not it and i.get("ia_desc") and i.get("final_title")]
+    for _ in range(3):                         # la descripcion tampoco puede ser igual a la de otro video
+        if desc and not titulos.desc_repetida(desc, otras): break
+        if desc: print("  Descripción repetida, pido otra."); otras = otras + [desc]; desc = ""
+        if activa:
+            try:
+                r = ia.textos(modo, original or it.get("title", ""), texto, it.get("kind", "video"), prohibidos + [t], (cfg or {}).get("idioma_titulo", ""), otras)
+                if r and not titulos.repetido(r["titulo"], prohibidos + [t]) : desc = r["descripcion"].strip()
+                elif r: desc = r["descripcion"].strip()
+            except Exception: pass
+    if not desc or titulos.desc_repetida(desc, otras):
+        desc = titulos.desc_fallback(t, texto, (cfg or {}).get("tema_titulo", ""), otras, len(otras) + 1); print("  Descripción propia (única).")
     it["ia_title"], it["ia_desc"], it["final_title"] = t, desc, t[:100]
-    titulos.registrar(t[:100])                 # queda guardado ya: ningun otro video podra repetirlo
+    titulos.registrar(t[:100]); titulos.registrar_desc(desc)      # quedan guardados ya: ningun otro video podra repetirlos
     return t[:100], desc
 
 # ======================= subida con reanudado automático =======================
@@ -774,7 +826,7 @@ def up_progress(tab, it, t0, size_mb):
     """Porcentaje de subida: lo lee de Studio si puede; si no, lo estima (marcado con ~). Si la subida se corta, avisa."""
     frac = real = None
     try:
-        txt = texto_progreso(tab)
+        txt = texto_pie(tab) or texto_progreso(tab)
         m = re.search(r"(\d{1,3})\s*%", txt)
         if m: real = min(int(m.group(1)), 100); frac = real / 100; it["est"] = False
         elif re.search(r"upload complete|checks complete|finished|completad|finaliz|terminad", txt, re.I): frac = 1.0; it["est"] = False
@@ -1118,6 +1170,12 @@ def plan_horario(d, it, ahora_mode):
     """Cuándo sale cada item. Shorts de un mismo video largo: el 1.º ya (o en el próximo horario) y cada siguiente +split_gap horas."""
     cfg = d.get("config", {}); now = dt.datetime.now().astimezone(); lim = now + dt.timedelta(minutes=15)
     iso = lambda t: t.astimezone(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    if not it.get("parts") and (cfg.get("lista_cada") or 0) and not it.get("auto"):
+        # videos de una lista de reproducción / cola manual: uno cada X minutos (el primero ya, los demás programados en YouTube)
+        cada = dt.timedelta(minutes=float(cfg["lista_cada"])); prev = d.get("ult_pub")
+        t = now if not prev else max(now, local(prev) + cada)
+        d["ult_pub"] = iso(t)
+        return None if t <= lim else iso(t)
     if not it.get("parts"):
         if ahora_mode: return None
         if it.get("publishAt") and local(it["publishAt"]) > lim: return it["publishAt"]
@@ -1267,5 +1325,21 @@ def reanudar_only():
     except Exception as e: print("Fallo al reanudar:", e); marcar_fallo(d, [i for i in d["items"] if i["key"] in keys], "Falló al reanudar: " + str(e))
     print("Listo.")
 
+RUNF = ROOT / "running.json"; _FIN = threading.Event()
+
+def _latido():
+    """Avisa al worker cada 4 s que este proceso sigue vivo (si el worker se reinicia, puede seguirlo o retomarlo)."""
+    args = sys.argv[1:]
+    while not _FIN.is_set():
+        try: RUNF.write_text(json.dumps({"pid": os.getpid(), "t": time.time(), "args": args}), "utf-8")
+        except Exception: pass
+        _FIN.wait(4)
+
 if __name__ == "__main__":
-    main()
+    import traceback
+    threading.Thread(target=_latido, daemon=True).start()
+    try:
+        main(); _FIN.set(); time.sleep(0.2); RUNF.unlink(missing_ok=True)       # terminó bien: no hay nada que retomar
+    except BaseException:
+        _FIN.set(); traceback.print_exc()                                     # se cortó: el latido se detiene y el worker lo retoma
+        sys.exit(1)

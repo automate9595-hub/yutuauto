@@ -10,6 +10,23 @@
 <p>Seguí los pasos de abajo y elegí lo que quieras en cada uno. Al final, un solo botón descarga, recorta, subtitula, edita y publica en tu canal.</p></div>
 <div class="stats"><div class="stat"><small>EN COLA</small><strong id="s-total">0</strong></div><div class="stat"><small>SHORTS</small><strong id="s-short">0</strong></div><div class="stat"><small>VIDEOS</small><strong id="s-video">0</strong></div><div class="stat acc"><small>PUBLICADOS</small><strong id="s-pub">0</strong></div></div></section>
 
+<nav class="ptabs" id="ptabs" aria-label="Pilotos automáticos">
+<button type="button" data-p="yts">⚡ Shorts de YouTube<i id="d-yts"></i></button>
+<button type="button" data-p="piloto">🔎 Videos de YouTube<i id="d-piloto"></i></button>
+<button type="button" data-p="tiktok">🎵 TikTok · cuenta<i id="d-tiktok"></i></button>
+<button type="button" data-p="tema-tt">🎲 TikTok · tema<i id="d-tema-tt"></i></button>
+<button type="button" data-p="pia">🤖 Creador IA<i id="d-pia"></i></button></nav>
+<p class="sub" id="ptip" style="margin:0 0 10px">Los pilotos trabajan solos: elegí uno, escribí el tema y <b>cada cuánto</b> subir. Podés dejar varios activos a la vez.</p>
+<section class="card pad" id="yts" style="display:grid;gap:12px;margin:0 0 16px">
+<h3 style="margin:0">⚡ Piloto de Shorts de YouTube</h3>
+<p class="sub" style="margin:0">Elegí un tema y cada cuánto querés un Short nuevo. En cada ciclo baja UN Short distinto del tema (nunca uno ya usado, nunca el mismo tramo), lo edita, le escribe título y descripción nuevos y lo publica.</p>
+<div class="row"><input id="ys-tema" type="search" placeholder="Tema central · ej: momentos épicos de Mobile Legends" style="flex:1;min-width:220px" autocomplete="off"></div>
+<div class="cfg pcfg" style="grid-template-columns:repeat(auto-fit,minmax(130px,1fr))">
+<label>Shorts por día<input id="ys-dia" type="number" min="1" max="60"></label>
+<label>Durante (días)<input id="ys-dias" type="number" min="1" max="365"></label></div>
+<div class="row"><button class="btn pri" id="ys-on" type="button">Activar piloto ▶</button><button class="btn ghost" id="ys-off" type="button">Pausar</button><span id="ys-msg" class="msg"></span></div>
+<small id="ys-estado" class="sub"></small></section>
+
 <section class="card pad" id="piloto" style="display:grid;gap:12px;margin:0 0 16px">
 <h3 style="margin:0">🔎 Piloto automático: buscar, descargar y publicar solo</h3>
 <p class="sub" style="margin:0">Escribí un tema central. La IA busca el video más relevante (sin repetir nunca el mismo), descarga, edita y lo sube. Usa tu configuración de los pasos de abajo.</p>
@@ -17,8 +34,7 @@
 <div class="cfg" style="grid-template-columns:repeat(auto-fit,minmax(130px,1fr))">
 <label>Shorts por día<input id="pl-shorts" type="number" min="0" max="60"></label>
 <label>Videos por día<input id="pl-videos" type="number" min="0" max="30"></label>
-<label>Durante (días)<input id="pl-dias" type="number" min="1" max="365"></label>
-<label>Shorts por video fuente<input id="pl-pv" type="number" min="1" max="10"></label></div>
+<label>Durante (días)<input id="pl-dias" type="number" min="1" max="365"></label></div>
 <div class="row"><button class="btn pri" id="pl-on" type="button">Activar piloto ▶</button><button class="btn ghost" id="pl-off" type="button">Pausar</button><span id="pl-msg" class="msg"></span></div>
 <small id="pl-estado" class="sub"></small></section>
 
@@ -147,8 +163,8 @@
 <label class="chk"><input id="c-ia_fx" type="checkbox"> Elegir y combinar efectos</label>
 <label class="chk"><input id="c-ia_zoom" type="checkbox"> Zooms y efectos en los momentos clave (la IA decide cuándo; sin IA, por ritmo del discurso)</label></div></div>
 <div class="grp"><button class="grp-h" type="button">Gemini <small id="ia-gemini"></small></button><div class="grp-b cfg">
-<input id="k-gemini" type="password" placeholder="Pegá la clave de Gemini" autocomplete="off">
-<div class="row"><button class="btn pri sm" data-ia="gemini" data-a="save">Guardar clave</button><button class="btn ghost sm" data-ia="gemini" data-a="test">Probar</button><button class="btn ghost sm danger" data-ia="gemini" data-a="del">Borrar</button></div>
+<textarea id="k-gemini" rows="2" style="width:100%;background:var(--in);color:var(--tx);border:1px solid var(--bd);border-radius:11px;padding:10px" placeholder="Pegá una o varias claves de Gemini (una por línea). Si una se queda sin cuota, pasa sola a la siguiente." autocomplete="off"></textarea>
+<div class="row"><button class="btn pri sm" data-ia="gemini" data-a="save">Agregar clave(s)</button><button class="btn ghost sm" data-ia="gemini" data-a="test">Probar</button><button class="btn ghost sm danger" data-ia="gemini" data-a="del">Borrar todas</button></div>
 <label>Modelo (vacío = automático: el Flash Lite más nuevo que acepte tu clave)<input id="k-modelo" list="modelos-gemini" placeholder="Automático · ej: gemini-flash-lite-latest" autocomplete="off"></label>
 <datalist id="modelos-gemini"><option value="gemini-flash-lite-latest"><option value="gemini-3.1-flash-lite"><option value="gemini-2.5-flash-lite"><option value="gemini-flash-latest"><option value="gemini-2.5-flash"></datalist>
 <div class="row"><button class="btn ghost sm" data-ia="gemini" data-a="model">Guardar modelo</button></div></div></div>
@@ -167,6 +183,7 @@
 <section class="stp" data-n="7"><button class="stp-h" type="button" aria-expanded="false"><i class="num">7</i><span class="tt"><b>Publicación</b><small id="sum-7"></small></span><span class="chev">▾</span></button>
 <div class="stp-b">
 <div class="cfg"><label>Al subir a YouTube<select id="c-publish"><option value="now">Publicar de inmediato (Público)</option><option value="schedule">Programar según los horarios</option></select></label></div>
+<div class="cfg" style="margin-top:14px"><label>Si pegás una playlist o varios videos: publicar uno cada (minutos, 0 = todos seguidos)<input id="c-lista_cada" type="number" min="0" max="10080" placeholder="0"></label></div>
 <div class="cfg" style="margin-top:14px"><label class="chk"><input id="c-auto_reanudar" type="checkbox"> Si una subida se corta (internet, Studio, Chrome), reanudarla sola: busca el archivo en la carpeta media y toca "Reanudar subida"</label></div>
 <div id="sch-box" class="grid2"><div class="cfg">
 <label>Shorts por día<input id="c-sn" type="number" min="0" max="6"></label>
@@ -200,4 +217,4 @@
 
 <div class="dock"><div id="dock-msg" class="dock-msg">Listo para procesar</div><button class="btn pri" id="dock-go" type="button">Procesar y publicar todo ⚡</button></div>
 <div id="win" class="win-back" aria-hidden="true"><div class="win" role="dialog" aria-modal="true"><div class="win-bar"><span class="d r" data-close></span><span class="d y" data-close></span><span class="d g"></span><b id="win-title"></b></div><div id="win-body" class="win-body"></div></div></div>
-<footer>Yutu Studio · v18.0</footer><script src="app.js"></script></body></html>
+<footer>Yutu Studio · v19.0</footer><script src="app.js"></script></body></html>
