@@ -803,11 +803,18 @@ def texto_progreso(tab):
     try:
         t = tab.eval("window.__A(%s).map(function(e){return e.innerText||''}).join(' | ')" % json.dumps(SEL_PROGRESO)) or ""
         if t.strip(" |\n"): return t
-        return tab.eval("(document.body.innerText||'').split('\\n').filter(function(l){return /subiendo|% subido|uploading|subida|upload/i.test(l)}).slice(0,8).join(' | ')") or ""
+        return tab.eval("(function(){var ex={};window.__A('ytcp-video-row').forEach(function(r){(r.innerText||'').split('\\n').forEach(function(l){ex[l.trim()]=1})});"
+                        "return (document.body.innerText||'').split('\\n').filter(function(l){l=l.trim();return l&&!ex[l]&&/subiendo|% subido|uploading|subida|upload/i.test(l)}).slice(0,8).join(' | ')})()") or ""
     except Exception: return ""
 
 def vigilar_subida(tab, real):
     """Lanza SubidaInterrumpida si Studio avisa que se cortó o si el porcentaje lleva demasiado sin avanzar."""
+    try: malo = bool(RE_ARCHIVO_INCORRECTO.search(tab.eval(JS_DIALOGO_TXT) or ""))
+    except Exception: malo = False
+    if malo:
+        try: cerrar_archivo_incorrecto(tab)
+        except Exception: pass
+        raise SubidaInterrumpida("Studio mostró «Archivo incorrecto»")
     m = RE_CORTE.search(texto_progreso(tab))
     if m: raise SubidaInterrumpida("Studio avisó: " + m.group(0))
     if real is not None and real < 100:
@@ -946,6 +953,176 @@ def revisar_cortadas(tab, cid, pending, chk):
     if hallados: print("  Subidas cortadas encontradas (las reanudo solas):", ", ".join(sorted(hallados)))
     return hallados
 
+# ======================= subidas cortadas: se ELIMINAN y se vuelve a subir (cada paso se verifica; si uno falla, NO se avanza) =======================
+RE_ARCHIVO_INCORRECTO = re.compile(r"archivo incorrecto|wrong file|incorrect file", re.I)
+RE_CONFIRMA_BORRAR = re.compile(r"eliminar|delete|permanente|permanent", re.I)
+RE_BOTON_BORRAR = r"^(eliminar definitivamente|delete forever|eliminar|delete)$"
+
+_ENDLG = "function enDlg(e){while(e){if(e.nodeType===1&&(/dialog/i.test(e.tagName)||e.getAttribute('role')==='dialog'))return true;e=e.parentNode||e.host}return false}"
+JS_DIALOGO_TXT = r"""(function(){var o=[];window.__A('ytcp-confirmation-dialog,ytcp-dialog,tp-yt-paper-dialog,[role=dialog]').forEach(function(e){var r=e.getBoundingClientRect();if(r.width>0&&r.height>0){var t=(e.innerText||'').trim();if(t)o.push(t)}});return o.join(' || ')})()"""
+_JS_FILA = r"""var rows=window.__A('ytcp-video-row'),n=(nombre||'').toLowerCase(),row=null;
+for(var i=0;i<rows.length&&!row;i++){var t=(rows[i].innerText||'').toLowerCase();if(/interrumpid|interrupted|reanudar subida|resume upload/.test(t)&&(!n||t.indexOf(n)>=0))row=rows[i]}
+if(!row)return null;row.scrollIntoView({block:'center'});var rr=row.getBoundingClientRect();"""
+JS_ELIMINAR_FILA = "(function(nombre){" + _JS_FILA + r"""
+var a=window.__A('ytcp-button,button,tp-yt-paper-button,a,[role=button],span,div',row),best=null;
+for(var j=0;j<a.length;j++){var e=a[j],t2=(e.innerText||'').trim();if(!/^(eliminar|delete)$/i.test(t2))continue;
+var r=e.getBoundingClientRect();if(r.width<=0||r.height<=0)continue;var s=/^(ytcp-button|button|tp-yt-paper-button|a)$/i.test(e.tagName)?0:1;if(!best||s<best.s)best={s:s,x:r.left+r.width/2,y:r.top+r.height/2}}
+return {fila:{x:rr.left+rr.width/2,y:rr.top+rr.height/2},btn:best?{x:best.x,y:best.y}:null}})(%s)"""
+JS_OPCIONES_FILA = "(function(nombre){" + _JS_FILA + r"""
+var a=window.__A('ytcp-icon-button,button,[role=button]',row);
+for(var j=0;j<a.length;j++){var e=a[j],l=(e.getAttribute('aria-label')||e.innerText||'').trim();if(!/^(opciones|options|m[aá]s opciones|more options|acciones)/i.test(l))continue;
+var r=e.getBoundingClientRect();if(r.width>0&&r.height>0)return {x:r.left+r.width/2,y:r.top+r.height/2}}return null})(%s)"""
+JS_CASILLAS = "(function(){" + _ENDLG + r"""
+var a=window.__A('ytcp-checkbox-lit,tp-yt-paper-checkbox,[role=checkbox],input[type=checkbox]'),m=[],o=[];
+function dentro(x,y){while(x){if(x===y)return true;x=x.parentNode||x.host}return false}
+for(var i=0;i<a.length;i++){var e=a[i];if(!enDlg(e))continue;var r=e.getBoundingClientRect();if(r.width<=0||r.height<=0)continue;m.push(e)}
+for(var i=0;i<m.length;i++){var e=m[i],anidada=false;for(var j=0;j<m.length;j++){if(j!==i&&dentro(e,m[j])){anidada=true;break}}if(anidada)continue;
+var r=e.getBoundingClientRect(),c=e.getAttribute('aria-checked')==='true'||e.hasAttribute('checked')||e.checked===true;
+o.push({x:r.left+Math.min(18,r.width/2),y:r.top+r.height/2,c:c,t:String(e.innerText||e.getAttribute('aria-label')||'').trim().slice(0,100)})}
+return o})()"""
+JS_BOTON_DLG = "(function(re){" + _ENDLG + r"""var rx=new RegExp(re,'i'),a=window.__A('ytcp-button,button,tp-yt-paper-button,[role=button],a');
+for(var i=0;i<a.length;i++){var e=a[i];if(!enDlg(e))continue;var r=e.getBoundingClientRect();if(r.width<=0||r.height<=0)continue;
+var t=(e.innerText||e.getAttribute('aria-label')||'').trim();if(!t||t.length>60||!rx.test(t))continue;
+return {x:r.left+r.width/2,y:r.top+r.height/2,dis:e.hasAttribute('disabled')||e.getAttribute('aria-disabled')==='true',t:t}}return null})(%s)"""
+
+def _clic_xy(tab, x, y):
+    tab.call("Input.dispatchMouseEvent", {"type": "mouseMoved", "x": x, "y": y})
+    for t in ("mousePressed", "mouseReleased"):
+        tab.call("Input.dispatchMouseEvent", {"type": t, "x": x, "y": y, "button": "left", "clickCount": 1})
+
+def _hasta(cond, timeout, chk=None, cada=0.5):
+    """Repite 'cond' hasta que devuelva algo verdadero o se acabe el tiempo (None). Un error de la página (está navegando) cuenta como 'todavía no'."""
+    fin = time.time() + timeout
+    while time.time() < fin:
+        if chk: chk()
+        try:
+            r = cond()
+            if r: return r
+        except Cancelled: raise
+        except Exception: pass
+        time.sleep(cada)
+    return None
+
+def _dialogo_borrar(tab):
+    txt = tab.eval(JS_DIALOGO_TXT) or ""
+    return txt if (txt and RE_CONFIRMA_BORRAR.search(txt) and not RE_ARCHIVO_INCORRECTO.search(txt)) else ""
+
+def _boton_dialogo(tab, patron):
+    return tab.eval(JS_BOTON_DLG % json.dumps(patron))
+
+def _cancelar_dialogo(tab):
+    try:
+        b = _boton_dialogo(tab, r"^(cancelar|cancel)$")
+        if b: _clic_xy(tab, b["x"], b["y"])
+        else: tab.tecla("Escape", 27)
+        time.sleep(0.8)
+    except Exception: pass
+
+def cerrar_archivo_incorrecto(tab, chk=None):
+    """Si Studio muestra 'Archivo incorrecto' (pide el archivo original para reanudar), lo cierra con Cancelar. True si estaba abierto."""
+    try: txt = tab.eval(JS_DIALOGO_TXT) or ""
+    except Exception: return False
+    if not RE_ARCHIVO_INCORRECTO.search(txt): return False
+    paso("Studio mostró 'Archivo incorrecto': toco Cancelar")
+    _cancelar_dialogo(tab)
+    if not _hasta(lambda: not RE_ARCHIVO_INCORRECTO.search(tab.eval(JS_DIALOGO_TXT) or ""), 10, chk): raise RuntimeError("No pude cerrar el cuadro 'Archivo incorrecto'")
+    return True
+
+def _tocar_eliminar(tab, nombre, chk):
+    """Paso 1: toca 'Eliminar' en la fila de la subida cortada y confirma que se abrió el cuadro de confirmación."""
+    r = tab.eval(JS_ELIMINAR_FILA % json.dumps(nombre))
+    if not r: return False
+    try: tab.call("Input.dispatchMouseEvent", {"type": "mouseMoved", "x": r["fila"]["x"], "y": r["fila"]["y"]})     # los botones de la fila a veces aparecen al pasar el mouse
+    except Exception: pass
+    time.sleep(0.4); r = tab.eval(JS_ELIMINAR_FILA % json.dumps(nombre)) or r
+    if r.get("btn"): _clic_xy(tab, r["btn"]["x"], r["btn"]["y"])
+    else:                                                                    # sin botón visible: menú de opciones (⋮) de la fila
+        o = tab.eval(JS_OPCIONES_FILA % json.dumps(nombre))
+        if not o: return False
+        _clic_xy(tab, o["x"], o["y"]); time.sleep(1)
+        if not tab.clic_texto(RE_BOTON_BORRAR, "tp-yt-paper-item, ytcp-text-menu-item, [role=menuitem], [role=option]"): return False
+    return bool(_hasta(lambda: _dialogo_borrar(tab), 15, chk))
+
+def _tildar_conciencia(tab, chk):
+    """Paso 2: tilda 'Soy consciente...' y confirma que el botón 'Eliminar definitivamente' quedó habilitado."""
+    fin = time.time() + 20; clics = 0
+    while time.time() < fin:
+        chk()
+        cs = tab.eval(JS_CASILLAS) or []
+        b = _boton_dialogo(tab, RE_BOTON_BORRAR)
+        pend = [c for c in cs if not c["c"]]
+        habilitado = bool(b and not b["dis"])
+        if pend and clics < 2 and not (habilitado and clics >= 1):
+            _clic_xy(tab, pend[0]["x"], pend[0]["y"]); clics += 1; time.sleep(0.8); continue
+        if habilitado: return True
+        time.sleep(0.5)
+    return False
+
+def _confirmar_borrado(tab, chk):
+    """Paso 3: toca 'Eliminar definitivamente' y confirma que el cuadro se cerró."""
+    b = _boton_dialogo(tab, RE_BOTON_BORRAR)
+    if not b or b["dis"]: return False
+    _clic_xy(tab, b["x"], b["y"])
+    return bool(_hasta(lambda: not _dialogo_borrar(tab), 30, chk))
+
+def eliminar_subida_cortada(tab, cid, ruta, fila, filas, chk):
+    """Eliminar -> tildar 'soy consciente' -> Eliminar definitivamente -> comprobar en la lista. No pasa al siguiente paso si el anterior no se completó."""
+    url = f"https://studio.youtube.com/channel/{cid}/videos/{ruta}"
+    nombre = nombre_en_fila(fila["t"]) or ""
+    clave = lambda f: nombre_en_fila(f["t"]) or f.get("vid") or f["t"][:80]
+    k = clave(fila); antes = sum(1 for f in filas if clave(f) == k); et = nombre or "subida cortada"; ultimo = "sin detalle"
+    for intento in range(1, 4):
+        chk()
+        try:
+            cerrar_archivo_incorrecto(tab, chk)
+            paso(f"{et}: 1/4 tocando 'Eliminar' (intento {intento}/3)")
+            if not _tocar_eliminar(tab, nombre, chk): raise RuntimeError("no se abrió el cuadro de confirmación al tocar 'Eliminar'")
+            paso(f"{et}: 2/4 tildando 'Soy consciente...'")
+            if not _tildar_conciencia(tab, chk): raise RuntimeError("no pude tildar la casilla «soy consciente» (el botón de eliminar sigue bloqueado)")
+            paso(f"{et}: 3/4 tocando 'Eliminar definitivamente'")
+            if not _confirmar_borrado(tab, chk): raise RuntimeError("Studio no cerró el cuadro después de 'Eliminar definitivamente'")
+            paso(f"{et}: 4/4 verificando que desapareció de la lista")
+            for _ in range(3):
+                chk(); time.sleep(3); tab.ir(url)
+                if sum(1 for f in filas_cortadas(tab, 25, chk) if clave(f) == k) < antes:
+                    print(f"  Subida cortada eliminada: {et}."); return True
+            raise RuntimeError("la subida cortada sigue en la lista después de eliminarla")
+        except Cancelled: raise
+        except Exception as e:
+            ultimo = str(e)[:120]; print(f"  Eliminar subida cortada: intento {intento}/3 falló en «{STEP[0]}»: {ultimo}")
+            try: guardar_diagnostico(tab, e)
+            except Exception: pass
+            _cancelar_dialogo(tab)
+            try:
+                tab.ir(url)
+                if sum(1 for f in filas_cortadas(tab, 25, chk) if clave(f) == k) < antes: print(f"  Subida cortada eliminada: {et}."); return True
+            except Cancelled: raise
+            except Exception: pass
+    raise RuntimeError(f"No pude eliminar la subida cortada ({et}): {ultimo}. No sigo para no repetir el corte.")
+
+def _es_de_este_worker(f, nombres):
+    t = f["t"].lower(); n = nombre_en_fila(f["t"])
+    if n and n in nombres: return True
+    if any(x in t for x in nombres): return True
+    return bool(n) and n.endswith("_final.mp4") and not (MEDIA / n).exists()     # huérfana: el archivo ya no existe, no se podría reanudar nunca
+
+def limpiar_cortadas(tab, cid, nombres, chk):
+    """Antes de subir: elimina de Studio TODA subida cortada de estos archivos (y las huérfanas _final.mp4). Devuelve cuántas borró.
+    Si no logra eliminar una, lanza RuntimeError: no se sube encima de una cortada (eso era lo que provocaba el ciclo cortar-reiniciar-cortar)."""
+    nombres = {n.lower() for n in nombres}; borradas = 0
+    paso("revisando si quedó alguna subida cortada en Studio")
+    for ruta, esp in (("upload", 25), ("short", 12)):
+        for _ in range(15):
+            chk(); tab.ir(f"https://studio.youtube.com/channel/{cid}/videos/{ruta}")
+            filas = filas_cortadas(tab, esp, chk)
+            mias = [f for f in filas if _es_de_este_worker(f, nombres)]
+            if not mias: break
+            print(f"  Hay {len(mias)} subida(s) cortada(s) en «{ruta}»: las elimino antes de subir.")
+            eliminar_subida_cortada(tab, cid, ruta, mias[0], filas, chk); borradas += 1
+        else: raise RuntimeError("Siguen apareciendo subidas cortadas después de eliminar 15: no sigo")
+    if borradas: print(f"  Subidas cortadas eliminadas: {borradas}. Ahora creo la subida nueva.")
+    return borradas
+
 def capturar_id(tab, it):
     if it.get("_draft"): return
     try:
@@ -1028,12 +1205,12 @@ def _cierre_dialogo(tab, cid, it, chk, t0, size_mb, now_mode, when):
     avanzar_hasta_visibilidad(tab, it, t0, size_mb, chk); capturar_id(tab, it)
     fijar_visibilidad(tab, now_mode, when, chk)
     paso("esperando a que termine la subida")
-    end = time.time() + 1500
+    limite = max(1500, int(size_mb * 30) + 900); end = time.time() + limite        # proporcional al tamaño: un video grande no se da por cortado a los 25 min mientras sigue subiendo
     while True:
         chk(); up_progress(tab, it, t0, size_mb); capturar_id(tab, it)
         if tab.habilitado("#done-button"): break
         if now_mode and int(time.time() - t0) % 20 == 0 and not publico_marcado(tab): elegir_publico(tab)   # por si no quedo marcado
-        if time.time() > end: raise SubidaInterrumpida("La subida tardó más de 25 minutos")
+        if time.time() > end: raise SubidaInterrumpida(f"La subida tardó más de {limite // 60} minutos")
         time.sleep(1.5)
     it["_subida_ok"] = True
     if D is not None: save(D)
@@ -1212,9 +1389,11 @@ def studio_upload_one(tab, cid, it, cfg=None, cortadas=None):
     except Exception: pass
     it["status"] = "uploading"; it.pop("error", None); it.pop("yt_url", None); set_prog(it, "up", 0.0, True)
     nombre = pathlib.Path(it["file"]).name.lower()
+    if size_mb < 0.01: raise RuntimeError("El archivo final está vacío o incompleto: " + nombre)
     if it.get("_subida_ok") and it.get("_draft"): modo = "borrador"
-    elif cortadas and nombre in cortadas: modo = "reanudar"
-    else: modo = "nuevo"; it.pop("_draft", None); it.pop("_subida_ok", None)
+    else:
+        modo = "nuevo"; it.pop("_draft", None); it.pop("_subida_ok", None)
+        asegurar_tab(tab, chk); limpiar_cortadas(tab, cid, {nombre}, chk)          # si hay una cortada y no se puede eliminar, NO se sigue
     ultimo = None
     for intento in range(1, maxi + 1):
         _PROG.update(pct=None, t=time.time())
@@ -1248,9 +1427,9 @@ def studio_upload_one(tab, cid, it, cfg=None, cortadas=None):
             except Exception: pass
             if it.get("_subida_ok") and it.get("_draft"): modo = "borrador"
             else:
-                try: modo = "reanudar" if buscar_cortada(tab, cid, it, chk) else "nuevo"
-                except Cancelled: raise
-                except Exception: modo = "nuevo"
+                it.pop("_draft", None); it.pop("_subida_ok", None)
+                limpiar_cortadas(tab, cid, {nombre}, chk)                          # eliminar la cortada (no reanudar: Studio exige el archivo idéntico y daba 'Archivo incorrecto')
+                modo = "nuevo"
             print("  Sigo con:", {"reanudar": "reanudar la subida cortada", "borrador": "publicar el video ya subido", "nuevo": "subirlo de nuevo"}[modo])
     raise ultimo
 
@@ -1365,8 +1544,7 @@ def studio_upload(d, only=None, mode=None):
     try: tab, cid = _conectar_studio()
     except Exception as e:
         print("No pude preparar la subida:", e); marcar_fallo(d, pending, "No pude preparar la subida: " + str(e)); return
-    try: cortadas = revisar_cortadas(tab, cid, pending, lambda: None)
-    except Exception: cortadas = set()
+    cortadas = set()                                          # las subidas cortadas se eliminan video por video (limpiar_cortadas), no se reanudan
     auto = d.get("config", {}).get("auto_reanudar", True)
     for it in pending: _subir_item(d, tab, cid, it, cortadas, auto)
     try: tab.cerrar()
@@ -1386,9 +1564,6 @@ def subir_en_vivo(d, hilo, mode):
         if tab is None and not falla_conexion:
             try:
                 tab, cid = _conectar_studio()
-                if previos:
-                    try: cortadas = revisar_cortadas(tab, cid, previos, lambda: None)
-                    except Exception: cortadas = set()
             except Exception as e:
                 falla_conexion = True; print("No pude preparar la subida:", e)
         it = listos[0]; hechos.add(it["key"])
