@@ -30,9 +30,22 @@ def _rango(d):
     return {"dmin": f("dmin"), "dmax": f("dmax")}
 
 def _duracion(url):
-    """Duración en segundos (yt-dlp con varias variantes y las cookies de TikTok si hay). 0 = no se pudo saber."""
-    try: return int(float(tiktok.ytdlp_texto(["--no-playlist", "--no-warnings", "--print", "duration"], url, timeout=60).strip().splitlines()[-1]))
-    except Exception: return 0
+    """Duración en segundos sin gastar de más (yt-dlp rápido y, si no, la página en el Chrome oculto). 0 = no se pudo saber."""
+    return tiktok.duracion(url)
+
+def limpiar_memoria():
+    """Borra lo ya usado/rechazado, el historial y las fuentes de TODOS los pilotos. Conserva su configuración y el cupo de hoy."""
+    n = 0
+    for f, claves in ((PF, ("usados", "hist")), (TF, ("usados", "rechazados", "hist", "lista")), (PTF, ("usados", "rechazados", "hist", "fuentes", "muertas", "cache")),
+                      (YF, ("usados", "hist")), (ROOT / "piloto-ia.json", ("ideas", "hist"))):
+        try: d = json.loads(f.read_text("utf-8"))
+        except Exception: continue
+        for k in claves:
+            if k in d: d[k] = {} if k == "cache" else []
+        d["lista_t"] = 0; d["estado"] = "Memoria borrada: vuelvo a buscar desde cero."
+        try: f.write_text(json.dumps(d, indent=2, ensure_ascii=False), "utf-8"); n += 1
+        except Exception: pass
+    return n
 
 def en_rango(p, v):
     """¿La duración del video está entre el mínimo y el máximo del piloto? (si no se conoce, se consulta; si no se puede, pasa)"""
@@ -293,6 +306,7 @@ def tick_tm(items_existentes, log=print):
     ya = {i.get("id") for i in items_existentes} | set(p["usados"]) | set(p["rechazados"])
     def vivas():
         return [f for f in p["fuentes"] if f not in p["muertas"] and (f not in p["cache"] or any(v["id"] not in ya for v in p["cache"][f]))]
+    abiertas, cont = 0, {"dur": 0, "tema": 0}                # abiertas: páginas leídas en esta pasada (tope 3: cuida la PC)
     for _ in range(8):                                      # prueba hasta 8 fuentes distintas, al azar
         vs = vivas()
         if not vs:
@@ -307,6 +321,8 @@ def tick_tm(items_existentes, log=print):
             log("TikTok tema: fuentes nuevas: " + ", ".join(nuevas[:8])); continue
         f = next((x for x in vs if x.startswith("?")), None) or random.choice(vs)       # primero las búsquedas del tema
         if f not in p["cache"]:
+            if abiertas >= 3: p["estado"] = "Busqué en 3 fuentes sin encontrar un video válido; sigo en el próximo ciclo."; guardar_tm(p); return []
+            abiertas += 1; p["estado"] = f"Buscando en TikTok (segundo plano): {f}"; guardar_tm(p)
             try: lst = _listar_fuente(f, log)
             except Exception as e: lst = []; log(f"TikTok tema: error leyendo {f}: {str(e)[:80]}")
             if not lst:
@@ -319,15 +335,15 @@ def tick_tm(items_existentes, log=print):
         if kind == "video": cand = [v for v in cand if not v["dur"] or v["dur"] >= 60] or cand
         random.shuffle(cand)
         for v in cand[:8]:
-            if not en_rango(p, v): p["rechazados"].append(v["id"]); ya.add(v["id"]); continue
-            if v["t"] and not es_del_tema(v["t"], p["tema"]): p["rechazados"].append(v["id"]); ya.add(v["id"]); continue      # sin texto: se acepta (la fuente ya es del tema)
+            if not en_rango(p, v): p["rechazados"].append(v["id"]); ya.add(v["id"]); cont["dur"] += 1; continue
+            if v["t"] and not es_del_tema(v["t"], p["tema"]): p["rechazados"].append(v["id"]); ya.add(v["id"]); cont["tema"] += 1; continue      # sin texto: se acepta (la fuente ya es del tema)
             p["usados"].append(v["id"]); h[kind] += 1; h["ultimo"] = time.time()
             p["hist"] = (p.get("hist", []) + [{"id": v["id"], "t": v["t"][:80], "f": f, "k": kind, "d": hoy.isoformat()}])[-200:]
             p["estado"] = f"Día {dia}/{p['dias']}: {kind} de {f}. Shorts {h['short']}/{p['shorts']} · Videos {h['video']}/{p['videos']}"
             guardar_tm(p); log("TikTok tema: " + p["estado"])
             return [{"type": "video", "id": v["id"], "key": "video:" + v["id"], "kind": kind, "url": v["url"], "status": "pending", "n": 1, "auto": True, "origen": "tiktok", "dmin": p.get("dmin", 0), "dmax": p.get("dmax", 0)}]
         if not [v for v in p["cache"][f] if v["id"] not in ya] and f not in p["muertas"]: p["muertas"].append(f)
-    p["estado"] = "Ningún video revisado era del tema; pruebo otras fuentes en el próximo ciclo."; guardar_tm(p); return []
+    p["estado"] = f"Revisé videos y ninguno sirvió (fuera de duración: {cont['dur']} · no eran del tema: {cont['tema']}); pruebo otras fuentes en el próximo ciclo."; guardar_tm(p); return []
 
 
 # ======================= Piloto YouTube Shorts =======================

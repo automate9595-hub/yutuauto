@@ -1,5 +1,5 @@
 """Servidor local: conecta la web con el worker (solo 127.0.0.1)."""
-import ia, piloto, generador, tiktok, json, os, pathlib, socket, subprocess, sys, threading, time, urllib.request
+import re, ia, piloto, generador, tiktok, json, os, pathlib, socket, subprocess, sys, threading, time, urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 ROOT = pathlib.Path(__file__).parent
 MEDIA = ROOT / "media"
@@ -47,9 +47,26 @@ def open_tab(url):
     try: urllib.request.urlopen(urllib.request.Request("http://127.0.0.1:9222/json/new?" + url, method="PUT"), timeout=3).read()
     except Exception: pass
 
-def launch_chrome():
-    if port_open():
-        open_tab("https://studio.youtube.com"); return True
+def _cerrar_tab(i):
+    try: urllib.request.urlopen(f"http://127.0.0.1:9222/json/close/{i}", timeout=3).read()
+    except Exception: pass
+
+def _studio_tabs(t=None):
+    return [x for x in (t if t is not None else (tabs() or [])) if x.get("type") == "page" and x.get("url", "").startswith("https://studio.youtube.com")]
+
+def launch_chrome(traer=False):
+    """Deja el Chrome del worker listo SIN abrir pestañas de más: si ya está abierto y tiene Studio, no hace nada (traer=True: lo muestra).
+    Si hay varias pestañas de Studio repetidas (de versiones anteriores), cierra las sobrantes y deja una."""
+    t = tabs()
+    if t is not None:
+        st = _studio_tabs(t)
+        if not st: open_tab("https://studio.youtube.com")
+        else:
+            for x in st[1:]: _cerrar_tab(x["id"])
+            if traer:
+                try: urllib.request.urlopen(f"http://127.0.0.1:9222/json/activate/{st[0]['id']}", timeout=3).read()
+                except Exception: pass
+        return True
     p = chrome_path()
     if not p: return False
     subprocess.Popen([p, "--remote-debugging-port=9222", f"--user-data-dir={ROOT / 'chrome-perfil'}", "--no-first-run",
@@ -167,6 +184,28 @@ def _fin_job():
     try: NOTIFY("Yutu Worker", "Proceso terminado. Revisa el panel.")
     except Exception: pass
 
+def _causa_corte():
+    """Última línea útil del error del proceso (p. ej. MemoryError) para mostrarla en la tarjeta."""
+    try:
+        lin = [l.strip() for l in JOBLOG.read_text("utf-8", "replace").splitlines()[-40:] if l.strip()]
+        for l in reversed(lin):
+            if re.match(r"^[\w.]*(Error|Exception|Interrupt)\b", l): return l[:160]
+        return lin[-1][:160] if lin else "sin detalle (ver job.log)"
+    except Exception: return "sin detalle (ver job.log)"
+
+def _marcar_cortados(causa=""):
+    """Los videos que quedaron 'en proceso' porque el proceso se cortó vuelven a la cola, pero a la 2.ª vez se marcan con error
+    (así no hay un bucle infinito de descargar y volver a empezar)."""
+    d = read_queue()
+    if not d: return
+    for i in d.get("items", []):
+        if i.get("status") != "processing": continue
+        i["fallos"] = int(i.get("fallos") or 0) + 1
+        if i["fallos"] >= 2:
+            i["status"] = "error"; i["stage"] = "Error"; i["error"] = "El proceso se cortó 2 veces en esta etapa" + (": " + causa if causa else "") + ". Probá con otro video o cerrá pestañas/programas para liberar memoria."
+        else: i["status"] = "pending"; i["pct"] = 0; i["aviso"] = "El proceso se cortó (" + (causa or "sin detalle") + "); lo reintento una vez."
+    write_queue(d)
+
 def run_job(extra):
     global PROC
     state["running"] = True; log("== Comenzando proceso ==")
@@ -178,6 +217,8 @@ def run_job(extra):
                                 creationflags=NOWIN | BAJA)
         _seguir(pos, PROC)
         fh.close()
+        if PROC.poll() not in (0, None): log(f"El proceso terminó con error (código {PROC.poll()}).")
+        if PROC.poll() not in (0, None): _marcar_cortados(_causa_corte())
     except Exception as e:
         log(f"ERROR: {e}")
     _fin_job()
@@ -199,7 +240,10 @@ def recuperar():
     d = read_queue()
     if d:                                                       # nada queda "procesando" para siempre
         for i in d.get("items", []):
-            if i.get("status") == "processing": i["status"] = "pending"
+            if i.get("status") == "processing":
+                i["fallos"] = int(i.get("fallos") or 0) + 1
+                i["status"] = "pending" if i["fallos"] < 2 else "error"
+                if i["status"] == "error": i["stage"] = "Error"; i["error"] = "El proceso se cortó 2 veces en esta etapa. Probá con otro video o liberá memoria."
             elif i.get("status") == "uploading" and i.get("file"): i["status"] = "ready"; i["reanudar"] = True; i["reanudar_en"] = 0
         write_queue(d)
     try: RUNF.unlink()
@@ -209,6 +253,43 @@ def recuperar():
     args = info.get("args") or ["--modo", "now"]
     log("El proceso se había cortado: lo retomo solo donde quedó.")
     threading.Thread(target=run_job, args=(args,), daemon=True).start()
+
+def limpiar(o):
+    """Botón 'Vaciar': quita de la lista las publicaciones elegidas, borra sus archivos, la memoria de los pilotos y los rastros (logs, diagnósticos)."""
+    import shutil
+    est = set(o.get("estados") or []) & {"cancelled", "error", "published", "scheduled", "ready", "pending"}
+    d = read_queue() or {"config": {}, "items": []}
+    quitar = [i for i in d.get("items", []) if i.get("status") in est]
+    resto = [i for i in d.get("items", []) if i.get("status") not in est]
+    if quitar: d["items"] = resto; write_queue(d)
+    global _LAST_ITEMS
+    _LAST_ITEMS = []
+    n_arch, mb = 0, 0.0
+    if o.get("archivos") and MEDIA.exists():
+        ids = [i.get("id") for i in resto if i.get("id")]
+        for f in MEDIA.iterdir():
+            try:
+                if f.is_file() and not any(f.name.startswith(x) for x in ids): mb += f.stat().st_size / 1048576; f.unlink(); n_arch += 1
+            except Exception: pass
+    pil = piloto.limpiar_memoria() if o.get("pilotos") else 0
+    if o.get("rastros"):
+        try: tiktok.bg_cerrar(); time.sleep(1)
+        except Exception: pass
+        for nm in ("job.log", "crash.json", "cancel.json", "segmentos-usados.json", "diagnostico-subida.txt", "diagnostico-ninos.txt", "diagnostico-tiktok.txt",
+                   "diagnostico-tiktok.png", "error-subida.png", "bg-uso.txt"):
+            try: (ROOT / nm).unlink(missing_ok=True)
+            except Exception: pass
+        for c in ("Cache", "Code Cache", "GPUCache", "Service Worker", "DawnCache", "GrShaderCache", "ShaderCache"):
+            for base in (ROOT / "chrome-bg", ROOT / "chrome-bg" / "Default"):
+                try: shutil.rmtree(base / c, ignore_errors=True)
+                except Exception: pass
+        LOG.clear()
+    partes = []
+    if est: partes.append(f"{len(quitar)} publicación(es) quitadas de la lista")
+    if o.get("archivos"): partes.append(f"{n_arch} archivo(s) borrados ({mb:.0f} MB)")
+    if o.get("pilotos"): partes.append("memoria de los pilotos borrada")
+    if o.get("rastros"): partes.append("registros y diagnósticos borrados")
+    return "Listo: " + (", ".join(partes) if partes else "no elegiste nada para borrar") + "."
 
 class H(BaseHTTPRequestHandler):
     def log_message(self, *a): pass
@@ -275,8 +356,8 @@ class H(BaseHTTPRequestHandler):
         if self._bad_origin(): return self._send({"ok": False}, 403)
         n = int(self.headers.get("Content-Length") or 0); data = json.loads(self.rfile.read(n) or b"{}")
         if self.path == "/connect":
-            if not launch_chrome(): return self._send({"ok": False, "message": "No encontre Chrome ni Edge."})
-            return self._send({"ok": True, "message": "Inicia sesion en YouTube en la pestana de Studio que se abrio."})
+            if not launch_chrome(traer=True): return self._send({"ok": False, "message": "No encontre Chrome ni Edge."})
+            return self._send({"ok": True, "message": "Inicia sesion en YouTube en la pestana de Studio (si ya lo hiciste, no hace falta nada mas)."})
         if self.path == "/forzar":
             state["youtube"] = True; state["detail"] = "Marcado como conectado manualmente."
             return self._send({"ok": True, "message": "Marcado como conectado."})
@@ -287,7 +368,7 @@ class H(BaseHTTPRequestHandler):
             except Exception: pass
             merge_queue(data, bool(data.get("reedit")))
             want_up = bool(data.get("upload"))
-            no_up = (not want_up) or (not launch_chrome())
+            no_up = (not want_up) or not (port_open() or chrome_path())          # Chrome se abre recién cuando hay un video editado para subir
             if want_up and no_up: log("Sin Chrome/Edge: solo preparo los videos.")
             extra = ["--sin-subir"] if no_up else (["--modo", "now" if data.get("mode") != "schedule" else "schedule"])
             threading.Thread(target=run_job, args=(extra,), daemon=True).start()
@@ -299,12 +380,15 @@ class H(BaseHTTPRequestHandler):
         if self.path == "/ia-test":
             ok, msg = ia.probar(data.get("proveedor", ""))
             return self._send({"ok": ok, "message": msg})
+        if self.path == "/limpiar":
+            if state["running"]: return self._send({"ok": False, "message": "Hay un proceso en marcha. Cancelalo o esperá a que termine para vaciar."})
+            try: return self._send({"ok": True, "message": limpiar(data)})
+            except Exception as e: return self._send({"ok": False, "message": "No pude vaciar todo: " + str(e)[:120]})
         if self.path == "/tiktok-login":             # sesión de TikTok en el Chrome del worker (mejora lectura de cuentas, búsquedas y descargas)
             if data.get("accion") == "abrir":
                 if not launch_chrome(): return self._send({"ok": False, "message": "No encontré Chrome ni Edge."})
-                open_tab("https://www.tiktok.com/login")
+                if not any("tiktok.com" in x.get("url", "") for x in (tabs() or []) if x.get("type") == "page"): open_tab("https://www.tiktok.com/login")
                 return self._send({"ok": True, "message": "Abrí TikTok en la ventana de Chrome del worker. Iniciá sesión ahí y después tocá «Ya inicié sesión»."})
-            if not port_open(): return self._send({"ok": False, "message": "El Chrome del worker no está abierto. Tocá primero «Iniciar sesión en TikTok»."})
             ok = tiktok.sesion_iniciada()
             return self._send({"ok": ok, "login": ok, "message": "Sesión de TikTok detectada y guardada ✓" if ok else "Todavía no veo la sesión de TikTok. Iniciá sesión en la ventana de Chrome y probá de nuevo."})
         if self.path == "/piloto":                   # piloto automático: tema + cupo diario + días
@@ -375,7 +459,6 @@ def _piloto_tick():
     """Si algún piloto (búsqueda o TikTok) está activo y toca el siguiente video del día: lo agrega a la cola y lanza todo el proceso."""
     pa, pt, pm, pg, py = piloto.leer(), piloto.leer_tt(), piloto.leer_tm(), generador.leer(), piloto.leer_ys()
     if not (pa.get("activo") or pt.get("activo") or pm.get("activo") or pg.get("activo") or py.get("activo")): return
-    if (pt.get("activo") or pm.get("activo")): launch_chrome()          # TikTok se lee con el Chrome del worker
     d = read_queue() or {"config": pa.get("config") or pt.get("config") or pm.get("config") or pg.get("config") or {}, "items": []}
     nuevos = []
     for act, fn, nom in ((pa.get("activo"), piloto.tick, "Piloto"), (pt.get("activo"), piloto.tick_tt, "Piloto TikTok"), (pm.get("activo"), piloto.tick_tm, "Piloto TikTok tema"), (py.get("activo"), piloto.tick_ys, "Piloto YouTube Shorts")):
@@ -388,7 +471,6 @@ def _piloto_tick():
     if not nuevos: return
     d.setdefault("config", pa.get("config") or pt.get("config") or pm.get("config") or pg.get("config") or {}); d["config"]["publish"] = "now"
     d["items"] = d.get("items", []) + nuevos; write_queue(d)
-    if not launch_chrome(): log("Piloto: no pude abrir Chrome; lo dejo en la cola."); return
     try: (ROOT / "cancel.json").unlink()
     except Exception: pass
     threading.Thread(target=run_job, args=(["--modo", "now"],), daemon=True).start()
@@ -407,6 +489,8 @@ def vigilante():
     """Cada minuto: si una subida quedó cortada (marcada 'reanudar') y no hay nada en marcha, la retoma sola, sin que toques nada."""
     while True:
         time.sleep(60)
+        try: tiktok.bg_reposo(180)
+        except Exception: pass
         try:
             if not state["running"]: _piloto_tick()
             d = read_queue()

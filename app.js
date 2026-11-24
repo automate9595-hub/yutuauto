@@ -238,7 +238,7 @@ $("ys-on").onclick=()=>ysSend(true);$("ys-off").onclick=()=>ysSend(false);
 /* ---------- "cada cuánto" en TODOS los pilotos (0 = automático: reparte el cupo del día) ---------- */
 function cadaCtl(secId,obj,saveFn){const cfgDiv=document.querySelector("#"+secId+" .cfg");if(!cfgDiv)return;
 const min=+obj.cada||0,hrs=min>=60&&min%60===0;
-const lab=document.createElement("label");lab.innerHTML='Subir uno nuevo cada<span class="two"><input type="number" min="0" step="1" placeholder="Auto"><select><option value="m">minutos</option><option value="h">horas</option></select></span>';
+const lab=document.createElement("label");lab.className="wide";lab.innerHTML='Subir uno nuevo cada<span class="two"><input type="number" min="0" step="1" placeholder="Auto"><select><option value="m">minutos</option><option value="h">horas</option></select></span>';
 cfgDiv.appendChild(lab);const n=lab.querySelector("input"),u=lab.querySelector("select");u.value=hrs?"h":"m";n.value=min?(hrs?min/60:min):"";
 const upd=()=>{const v=Math.max(0,+n.value||0);obj.cada=Math.round(v*(u.value==="h"?60:1));saveFn()};n.oninput=upd;u.onchange=upd}
 cadaCtl("yts",ys,ysSave);cadaCtl("piloto",pl,()=>{try{localStorage.setItem(PL_K,JSON.stringify(pl))}catch{}});
@@ -274,12 +274,20 @@ unitCtl("pi-dur",()=>pi.duracion,v=>{pi.duracion=Math.max(20,v||45);piSave()},18
 
 /* ---------- límite de duración (mínimo / máximo) de los videos que busca cada piloto ---------- */
 function rangoCtl(secId,obj,saveFn){const cfgDiv=document.querySelector("#"+secId+" .cfg");if(!cfgDiv)return;
-const lab=document.createElement("label");lab.style.gridColumn="1/-1";
-lab.innerHTML='Duración de los videos que busca<span class="two" style="grid-template-columns:1fr 1fr 110px"><input type="number" min="0" step="any" placeholder="Mínimo (sin límite)" data-r="dmin"><input type="number" min="0" step="any" placeholder="Máximo (sin límite)" data-r="dmax"><select><option value="m">minutos</option><option value="s">segundos</option></select></span><small class="sub">Ej.: mínimo 1 y máximo 10 minutos. Vacío = sin límite. Se admiten decimales (0,5 = 30 s).</small>';
-cfgDiv.appendChild(lab);const us=lab.querySelector("select");us.value=obj.dunit==="s"?"s":"m";
-const ins=[...lab.querySelectorAll("input")],paint=()=>ins.forEach(el=>el.value=secShow(obj[el.dataset.r],us.value));paint();
-ins.forEach(el=>el.oninput=()=>{obj[el.dataset.r]=secRead(el.value,us.value);saveFn()});
-us.onchange=()=>{obj.dunit=us.value;paint();saveFn()}}
+const box=document.createElement("div");box.className="durbox";
+box.innerHTML='<div class="dh"><b>⏱ Duración de los videos que busca</b><span class="seg"><button type="button" data-u="m">Minutos</button><button type="button" data-u="s">Segundos</button></span></div>'+
+'<label>Mínimo<span class="fin"><input type="number" min="0" step="any" placeholder="sin límite" data-r="dmin"><em></em></span></label>'+
+'<label>Máximo<span class="fin"><input type="number" min="0" step="any" placeholder="sin límite" data-r="dmax"><em></em></span></label>'+
+'<p class="sumr"></p>';
+cfgDiv.appendChild(box);let u=obj.dunit==="s"?"s":"m";const ins=[...box.querySelectorAll("input")],ems=[...box.querySelectorAll("em")],sum=box.querySelector(".sumr");
+const fm=sec=>sec>=60?+(sec/60).toFixed(2)+" min":sec+" s";
+const paint=()=>{ins.forEach(el=>el.value=secShow(obj[el.dataset.r],u));ems.forEach(e=>e.textContent=u==="m"?"min":"seg");
+box.querySelectorAll(".seg button").forEach(b=>b.classList.toggle("on",b.dataset.u===u));
+const lo=+obj.dmin||0,hi=+obj.dmax||0;sum.textContent=lo&&hi?`Buscará videos de ${fm(lo)} a ${fm(hi)}.`:lo?`Buscará videos de al menos ${fm(lo)} (sin máximo).`:hi?`Buscará videos de hasta ${fm(hi)} (sin mínimo).`:"Sin límite de duración. Ej.: 1 a 10 minutos (admite decimales: 0,5 = 30 s)."};
+paint();
+ins.forEach(el=>el.oninput=()=>{obj[el.dataset.r]=secRead(el.value,u);saveFn();sum.textContent="";paintSum()});
+const paintSum=()=>{const lo=+obj.dmin||0,hi=+obj.dmax||0;sum.textContent=lo&&hi?`Buscará videos de ${fm(lo)} a ${fm(hi)}.`:lo?`Buscará videos de al menos ${fm(lo)} (sin máximo).`:hi?`Buscará videos de hasta ${fm(hi)} (sin mínimo).`:"Sin límite de duración."};
+box.querySelectorAll(".seg button").forEach(b=>b.onclick=()=>{u=b.dataset.u;obj.dunit=u;saveFn();paint()})}
 rangoCtl("yts",ys,ysSave);rangoCtl("piloto",pl,()=>{try{localStorage.setItem(PL_K,JSON.stringify(pl))}catch{}});
 rangoCtl("tiktok",tt,()=>{try{localStorage.setItem(TT_K,JSON.stringify(tt))}catch{}});rangoCtl("tema-tt",tm,()=>{try{localStorage.setItem(TM_K,JSON.stringify(tm))}catch{}});
 
@@ -288,3 +296,24 @@ function ttLogin(pre){const m=$(pre+"-lmsg");if(!m)return;
 $(pre+"-login").onclick=async()=>{m.textContent="Abriendo TikTok…";const r=await call("/tiktok-login",{accion:"abrir"},15000);m.textContent=r?r.message:"No encuentro el worker. Ejecutá 2-INSTALAR-Y-EJECUTAR.bat."};
 $(pre+"-chk").onclick=async()=>{m.textContent="Comprobando…";const r=await call("/tiktok-login",{accion:"comprobar"},40000);m.textContent=r?r.message:"No encuentro el worker. Ejecutá 2-INSTALAR-Y-EJECUTAR.bat."}}
 ttLogin("tt");ttLogin("tm");
+
+
+/* ---------- vaciar rastros ---------- */
+$("clean").onclick=()=>{openWin("🧹 Vaciar rastros",`<p class="sub">Elegí qué borrar. Lo que está en proceso no se toca, y tu sesión de YouTube/TikTok se conserva.</p>
+<div class="cfg" style="margin-top:12px">
+<label class="chk"><input type="checkbox" data-e="cancelled" checked> Publicaciones canceladas</label>
+<label class="chk"><input type="checkbox" data-e="error" checked> Publicaciones con error</label>
+<label class="chk"><input type="checkbox" data-e="published,scheduled" checked> Ya publicadas o programadas (siguen en YouTube; solo se quitan de esta lista)</label>
+<label class="chk"><input type="checkbox" data-e="pending"> En espera</label>
+<label class="chk"><input type="checkbox" data-e="ready"> Editadas y listas para subir (se pierde el video editado)</label>
+<hr style="border:0;border-top:1px solid var(--line);width:100%">
+<label class="chk"><input id="cl-arch" type="checkbox" checked> Borrar los videos descargados y archivos temporales de esta PC</label>
+<label class="chk"><input id="cl-rast" type="checkbox" checked> Borrar registros, diagnósticos y la caché del navegador oculto de TikTok</label>
+<label class="chk"><input id="cl-pil" type="checkbox"> Borrar la memoria de los pilotos (lo ya usado y rechazado): podrían volver a elegir videos repetidos</label>
+<label class="chk"><input id="cl-web" type="checkbox"> Vaciar también la lista de enlaces del paso 2</label>
+<div class="row"><button class="btn pri" id="cl-go" type="button">🧹 Vaciar ahora</button><span id="cl-msg" class="msg"></span></div></div>`);
+$("cl-go").onclick=async()=>{if(!confirm("¿Vaciar lo elegido? No se puede deshacer."))return;const m=$("cl-msg");m.className="msg";m.textContent="Vaciando…";
+const est=[...document.querySelectorAll("#win-body [data-e]")].filter(x=>x.checked).flatMap(x=>x.dataset.e.split(","));
+const r=await call("/limpiar",{estados:est,archivos:$("cl-arch").checked,rastros:$("cl-rast").checked,pilotos:$("cl-pil").checked},60000);
+if($("cl-web").checked){q=[];save();render()}
+m.className="msg"+(!r||!r.ok?" err":"");m.textContent=r?r.message:"No encuentro el worker. Ejecutá 2-INSTALAR-Y-EJECUTAR.bat.";poll()}};

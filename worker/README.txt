@@ -1,3 +1,21 @@
+YUTU WORKER (v23)
+
+NOVEDADES v23
+- YA NO SE ABREN VENTANAS DE TU CANAL A CADA RATO: antes el worker abría una pestaña nueva de YouTube Studio cada vez que revisaba los pilotos
+  (cada minuto), y eso llenaba la RAM. Ahora Chrome se abre SOLO al tocar "Conectar con mi canal" / "Iniciar sesión en TikTok" y cuando un video ya
+  está editado y listo para subir. Si había pestañas de Studio repetidas, el worker deja una y cierra las demás. La sesión se conserva siempre
+  (perfil chrome-perfil).
+- BUCLE "Analizando con IA" (volvía el % atrás y empezaba de nuevo): si la nube (Groq) fallaba, la IA transcribía TODO el video en tu PC, algo
+  muy lento y pesado. Ahora, en videos de más de 5 min, solo usa la nube; si no puede, usa el corte normal. La barra de progreso nunca retrocede
+  y, si el proceso se corta dos veces en el mismo video, se marca con error y la causa (p. ej. MemoryError) en vez de repetir sin fin.
+- TIKTOK EN SEGUNDO PLANO: las búsquedas y lecturas de TikTok usan un Chrome OCULTO (sin ventana, sin imágenes ni video, perfil chrome-bg) que se
+  cierra solo a los 3 min sin uso. Tu sesión de TikTok se copia sola desde el Chrome visible. Si TikTok no devuelve videos, se guarda
+  diagnostico-tiktok.txt y .png con lo que vio el navegador.
+- Los pilotos de TikTok leen como máximo 3 páginas por ciclo y el estado dice qué pasó (buscando..., fuera de duración, no era del tema).
+- INTERVALOS DE DURACIÓN rediseñados: bloque grande con Mínimo / Máximo, selector Minutos | Segundos y una frase que resume el rango.
+- BOTÓN "🧹 Vaciar rastros…" en Publicaciones: quita canceladas, con error, publicadas..., borra videos descargados/temporales, registros,
+  diagnósticos y caché, y (opcional) la memoria de los pilotos y la lista de enlaces. No toca lo que está en proceso ni tus sesiones.
+
 YUTU WORKER (v22)
 
 NOVEDADES v22

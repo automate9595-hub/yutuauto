@@ -42,11 +42,13 @@ def make_plan(cfg, upload):
         plan[k] = (acc / tot, w[k] / tot); acc += w[k]
     return plan
 
+_PASADA = str(os.getpid()) + "-" + str(int(time.time()))      # cada ejecución del proceso es una pasada nueva
 LABEL = {"dl": "Descargando", "ia": "Analizando con IA", "sub": "Subtitulos", "edit": "Editando", "up": "Subiendo"}
 def set_prog(it, stage, frac, force=False):
     off, wt = PLAN.get(stage, (0, 1))
     pct = int(round(100 * (off + wt * max(0.0, min(1.0, frac)))))
-    it["stage"] = LABEL[stage]; it["pct"] = pct
+    if pct < int(it.get("pct") or 0) and it.get("_pasada") == _PASADA: pct = int(it.get("pct") or 0)        # un motor que reintenta no hace "volver atrás" la barra
+    it["_pasada"] = _PASADA; it["stage"] = LABEL[stage]; it["pct"] = pct
     now = time.time()
     if force or pct != _last[1] and now - _last[0] > 0.7:
         _last[0], _last[1] = now, pct
@@ -215,7 +217,8 @@ def subtitles(it, src, start, length, cfg, short):
 def transcribe_full(it, src, cfg, dur):
     """Transcripcion de todo el video, solo para que la IA elija el mejor tramo (si fue en la nube se reutiliza en los subtitulos)."""
     words = voz.palabras(FFMPEG, src, 0, dur, cfg.get("lang", "es"), "base",
-                         lambda f: set_prog(it, "ia", f), lambda: check_cancel(it), motor="rapido", titulo=it.get("title", ""))
+                         lambda f: set_prog(it, "ia", f), lambda: check_cancel(it), motor="rapido", titulo=it.get("title", ""),
+                         solo_nube=dur > 300)            # transcribir un video largo en la PC la cuelga: si no hay nube, se usa el corte normal
     if str(getattr(voz, "ULTIMO", "")).startswith("groq") and cfg.get("stt", "auto") in ("auto", "groq_turbo", "groq_v3"): it["_full_words"] = words
     return voz.frases(words)
 
@@ -1239,7 +1242,16 @@ def plan_horario(d, it, ahora_mode):
 def _conectar_studio():
     """-> (tab, cid). Usa la pestaña de Studio ya abierta del Chrome del worker (no toca las conexiones existentes)."""
     print("Conectando con el Chrome del worker...")
-    tab = cdp.Tab.existente("https://studio.youtube.com") or cdp.Tab.abrir("https://studio.youtube.com")
+    tab = cdp.Tab.existente("https://studio.youtube.com")
+    if not tab:                                              # Chrome se abre SOLO ahora, cuando ya hay un video editado para subir
+        try:
+            import servidor; servidor.launch_chrome()
+        except Exception: pass
+        for _ in range(24):
+            tab = cdp.Tab.existente("https://studio.youtube.com")
+            if tab: break
+            time.sleep(0.5)
+        tab = tab or cdp.Tab.abrir("https://studio.youtube.com")
     print("Si no iniciaste sesion en YouTube, hacelo en la ventana de Chrome (espero hasta 5 min)...")
     end = time.time() + 300; cid = None
     while time.time() < end:
@@ -1334,7 +1346,7 @@ def main():
             if it["status"] not in ("pending", "processing"): continue
             try:
                 check_cancel(it)
-                it["status"] = "processing"; it.pop("error", None); save(d)
+                it["status"] = "processing"; it.pop("error", None); it["pct"] = 0; save(d)
                 print("Procesando", it.get("url") or it.get("tema") or it.get("key")); process(it, d["config"])
             except Cancelled:
                 it["status"] = "cancelled"; it["stage"] = "Cancelado"; print("Cancelado:", it.get("title") or it.get("url"))

@@ -201,10 +201,12 @@ def orden(motor):
     else: base = ["groq_v3", "groq_turbo", "local", "vosk"]            # auto: lo mejor primero
     return [m for m in base if tiene_groq or m not in GROQ_MODELOS]
 
-def palabras(ffmpeg, src, start, length, lang, modelo, prog, chk, motor="auto", titulo=""):
+def palabras(ffmpeg, src, start, length, lang, modelo, prog, chk, motor="auto", titulo="", solo_nube=False):
     """-> lista de Palabra con tiempos relativos al tramo. Lanza RuntimeError si ningun motor funciona."""
     errs, data = [], None
-    for m in orden(motor):
+    ms = [m for m in orden(motor) if m in GROQ_MODELOS] if solo_nube else orden(motor)
+    if solo_nube and not ms: raise RuntimeError("sin motor en la nube (Groq): no se analiza el video completo en la PC")
+    for m in ms:
         if m in _FALLO: continue
         try:
             if m in GROQ_MODELOS: out = _con_groq(m, ffmpeg, src, start, length, lang, titulo, prog, chk)

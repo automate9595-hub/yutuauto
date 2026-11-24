@@ -54,10 +54,11 @@ HELPERS = ("window.__D=window.__D||function(s,r){r=r||document;var x=r.querySele
            "var a=r.querySelectorAll('*');for(var i=0;i<a.length;i++){if(a[i].shadowRoot)window.__A(s,a[i].shadowRoot,o)}return o};")
 
 class Tab:
-    def __init__(self, info, propia=True):
-        self.id = info["id"]; self.propia = propia; self.n = 0; self.eventos = []
+    def __init__(self, info, propia=True, port=9222, traer=True):
+        self.id = info["id"]; self.propia = propia; self.n = 0; self.eventos = []; self.port = port; self.traer = traer
         self.ws = WS(info["webSocketDebuggerUrl"])
-        self.call("Page.enable"); self.call("Page.bringToFront")
+        self.call("Page.enable")
+        if traer: self.call("Page.bringToFront")                  # traer=False: trabajo en segundo plano, sin robar el foco
 
     @staticmethod
     def listar(port=9222):
@@ -74,7 +75,7 @@ class Tab:
         return None
 
     @staticmethod
-    def abrir(url="about:blank", port=9222):
+    def abrir(url="about:blank", port=9222, traer=True):
         q = f"http://127.0.0.1:{port}/json/new?" + urllib.parse.quote(url, safe=":/?&=#")
         info, err = None, None
         for m in ("PUT", "GET"):
@@ -82,7 +83,7 @@ class Tab:
                 with urllib.request.urlopen(urllib.request.Request(q, method=m), timeout=8) as r: info = json.loads(r.read()); break
             except Exception as e: err = e
         if not info: raise RuntimeError("Chrome no me dejó abrir una pestaña: " + str(err)[:100])
-        try: return Tab(info)
+        try: return Tab(info, port=port, traer=traer)
         except Exception as e:                                         # no dejar pestañas huérfanas
             try: urllib.request.urlopen(f"http://127.0.0.1:{port}/json/close/{info['id']}", timeout=3).read()
             except Exception: pass
@@ -142,7 +143,8 @@ class Tab:
             try: self.call("Page.setInterceptFileChooserDialog", {"enabled": False})
             except Exception: pass
 
-    def reconectar(self, port=9222):
+    def reconectar(self, port=None):
+        port = port or self.port
         """Vuelve a conectarse a la pestaña (o a otra de Studio) si Chrome o la pestaña se cerraron/colgaron."""
         try: self.ws.close()
         except Exception: pass
@@ -155,7 +157,8 @@ class Tab:
                     info = t; self.propia = False; break
         if not info: raise ConnectionError("No encuentro ninguna pestaña de YouTube Studio en el Chrome del worker")
         self.id = info["id"]; self.eventos = []; self.ws = WS(info["webSocketDebuggerUrl"])
-        self.call("Page.enable"); self.call("Page.bringToFront")
+        self.call("Page.enable")
+        if self.traer: self.call("Page.bringToFront")
 
     def eval(self, js, objeto=False, espera=False):
         r = self.call("Runtime.evaluate", {"expression": HELPERS + js, "returnByValue": not objeto, "awaitPromise": espera})
@@ -300,5 +303,5 @@ class Tab:
     def cerrar(self):
         self.ws.close()
         if not self.propia: return                      # la pestaña del usuario no se cierra
-        try: urllib.request.urlopen(f"http://127.0.0.1:9222/json/close/{self.id}", timeout=3).read()
+        try: urllib.request.urlopen(f"http://127.0.0.1:{self.port}/json/close/{self.id}", timeout=3).read()
         except Exception: pass

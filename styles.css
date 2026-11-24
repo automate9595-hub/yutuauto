@@ -111,5 +111,18 @@ footer{text-align:center;color:#5f7089;padding:20px 0 90px;font-size:13px}
 .ptabs button i{display:none;position:absolute;top:6px;right:6px;width:9px;height:9px;border-radius:50%;background:var(--mint);box-shadow:0 0 0 3px #10281f}
 .ptabs button i.act{display:block}
 .phid{display:none!important}
-.two{display:grid;grid-template-columns:1fr 112px;gap:8px}
+.two{display:grid;grid-template-columns:minmax(0,1fr) 124px;gap:8px}.cfg>label.wide{grid-column:1/-1}
 @media(max-width:560px){.ptabs button{padding:10px 11px;font-size:13px}.stp-b .cfg,.card .cfg{grid-template-columns:1fr!important}}
+
+/* intervalos de duración */
+.durbox{grid-column:1/-1;display:grid;grid-template-columns:1fr 1fr;gap:12px 14px;padding:16px;border:1px solid var(--line);border-radius:14px;background:#0c1524}
+.durbox .dh{grid-column:1/-1;display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap}
+.durbox .dh b{font-size:15px;color:var(--tx)}
+.durbox .seg{display:inline-flex;border:1px solid var(--bd);border-radius:11px;overflow:hidden;background:var(--in)}
+.durbox .seg button{background:transparent;border:0;color:var(--mu);padding:8px 16px;font:inherit;font-weight:700;font-size:13px;cursor:pointer}
+.durbox .seg button.on{background:var(--mint);color:#06281d}
+.durbox label{font-size:13px}.durbox input{font-size:20px;font-weight:700;padding:13px 14px;text-align:center}
+.durbox .fin{position:relative}.durbox .fin em{position:absolute;right:14px;top:50%;transform:translateY(-50%);font-style:normal;color:var(--mu);font-size:13px;pointer-events:none}
+.durbox .sumr{grid-column:1/-1;margin:0;padding:10px 12px;border-radius:10px;background:#12304a55;color:var(--mint);font-size:14px;font-weight:600}
+@media(max-width:560px){.durbox{grid-template-columns:1fr}}
+.durbox input[type=number]{-moz-appearance:textfield;appearance:textfield;padding-right:52px}.durbox input::-webkit-outer-spin-button,.durbox input::-webkit-inner-spin-button{-webkit-appearance:none;margin:0}
