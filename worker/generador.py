@@ -6,7 +6,7 @@ Voz: edge-tts (gratis, voces neuronales con español latino) -> si no, voz de Wi
 -> si falla, fondo degradado. Montaje: FFmpeg con movimiento de camara + subtitulos sincronizados con la voz.
 """
 import asyncio, hashlib, json, os, pathlib, random, re, subprocess, sys, time, urllib.parse, urllib.request, datetime as dt
-import ia, titulos
+import ia, titulos, aprendizaje
 
 ROOT = pathlib.Path(__file__).parent
 GF = ROOT / "piloto-ia.json"
@@ -103,7 +103,8 @@ Responde SOLO este JSON: {{"escenas": [{{"texto": "...", "imagen": "..."}}]}}'''
     esc = esc[:max(9, n + 2)]
     prohib = titulos.usados([i for i in it.get("_prohibidos", [])])
     d3, a3 = _ia("claude_primero", f'''Eres editor de YouTube. Para este Short ({idea}) con guion: «{" ".join(e["texto"] for e in esc)[:900]}»
-escribe título y descripción en {nom}. Título de máximo 85 caracteres, con gancho, claramente DISTINTO de estos ya usados:
+escribe título y descripción en {nom}. {aprendizaje.guia()}
+Título de máximo 85 caracteres, claro, específico y que despierte curiosidad, claramente DISTINTO de estos ya usados:
 {chr(10).join("- " + x[:90] for x in prohib[-40:]) or "(ninguno)"}
 Descripción de 2 a 3 frases y 3 a 5 hashtags al final. Responde SOLO este JSON: {{"titulo": "...", "descripcion": "..."}}''')
     titulo, desc = _limpio(d3.get("titulo")) or idea[:85], str(d3.get("descripcion") or idea).strip()

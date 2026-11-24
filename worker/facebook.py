@@ -145,7 +145,9 @@ var h=a.href;var m=h.match(/\/reel\/(\d{8,})/)||h.match(/\/videos\/(\d{8,})/)||h
 var t=a.getAttribute('aria-label')||a.title||'';var im=a.querySelector('img');if(!t&&im)t=im.alt||'';
 if(!t){var n=a,k=0;while(n&&k<5&&!t){n=n.parentElement;k++;if(n&&n.innerText&&n.innerText.length>12&&n.innerText.length<500){
 var ls=n.innerText.split('\n').filter(function(x){return x.trim().length>12});if(ls.length)t=ls[0]}}}
-o.push({i:m[1],t:t||''})});return JSON.stringify(o)})()"""
+var vw='';var c=a;for(var k=0;k<5&&c&&!vw;k++){c=c.parentElement;if(!c||!c.innerText||c.innerText.length>400)break;
+var ls=c.innerText.split('\n');for(var j=0;j<ls.length;j++){if(/^\s*[\d][\d.,]*\s*(k|m|b|mil|mill\.?)?\s*$/i.test(ls[j])){vw=ls[j].trim();break}}}
+o.push({i:m[1],t:t||'',vw:vw})});return JSON.stringify(o)})()"""
 
 
 def _motivo_de(tx):
@@ -175,7 +177,7 @@ def listar(url, log=print, scrolls=8, espera=35):
         for it in items:
             i = it.get("i")
             if i and i not in vistos:
-                vistos[i] = {"id": i, "t": re.sub(r"\s+", " ", it.get("t", "")).strip()[:300], "dur": 0, "v": 0, "url": f"https://www.facebook.com/reel/{i}"}
+                vistos[i] = {"id": i, "t": re.sub(r"\s+", " ", it.get("t", "")).strip()[:300], "dur": 0, "v": tiktok.num_corto(it.get("vw")), "url": f"https://www.facebook.com/reel/{i}"}
     try:
         tab = _tab(url); time.sleep(3)
         fin = time.time() + espera

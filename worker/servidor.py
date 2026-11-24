@@ -1,5 +1,5 @@
 """Servidor local: conecta la web con el worker (solo 127.0.0.1)."""
-import re, ia, piloto, generador, tiktok, redes, json, os, pathlib, socket, subprocess, sys, threading, time, urllib.request, facebook
+import re, ia, piloto, generador, tiktok, redes, aprendizaje, json, os, pathlib, socket, subprocess, sys, threading, time, urllib.request, facebook
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 ROOT = pathlib.Path(__file__).parent
 MEDIA = ROOT / "media"
@@ -348,11 +348,11 @@ class H(BaseHTTPRequestHandler):
                                "text": "\n\n".join(partes) or "Todavía no hay diagnóstico guardado (no hubo errores de subida)."})
         refresh_login()
         self._send({"ok": True, **state, "log": LOG[-40:], "items": queue_items(), "ia": ia.estado(), "piloto": {k: v for k, v in piloto.leer().items() if k not in ("usados", "config")},
-                               "tiktok": {k: v for k, v in piloto.leer_tt().items() if k not in ("usados", "rechazados", "lista")},
-                               "tema_tt": {k: v for k, v in piloto.leer_tm().items() if k not in ("usados", "rechazados", "cache", "muertas", "hist")},
+                               "tiktok": {k: v for k, v in piloto.leer_tt().items() if k not in ("usados", "rechazados", "lista", "metr")},
+                               "tema_tt": {k: v for k, v in piloto.leer_tm().items() if k not in ("usados", "rechazados", "cache", "muertas", "hist", "metr")},
                                "piloto_ia": {k: v for k, v in generador.leer().items() if k not in ("ideas", "hist")},
-                               "piloto_yts": {k: v for k, v in piloto.leer_ys().items() if k not in ("usados", "hist")},
-                               "facebook": {k: v for k, v in piloto.leer_fb().items() if k not in ("usados", "rechazados", "lista", "cache", "muertas", "hist", "config")},
+                               "piloto_yts": {k: v for k, v in piloto.leer_ys().items() if k not in ("usados", "hist", "metr")},
+                               "facebook": {k: v for k, v in piloto.leer_fb().items() if k not in ("usados", "rechazados", "lista", "cache", "muertas", "hist", "config", "metr")},
                                "proximos": _proximos(), "ahora": time.time(), "destinos": redes.leer_destinos()})
     def do_POST(self):
         if self._bad_origin(): return self._send({"ok": False}, 403)
@@ -393,6 +393,15 @@ class H(BaseHTTPRequestHandler):
                 return self._send({"ok": True, "message": "Abrí TikTok en la ventana de Chrome del worker. Iniciá sesión ahí y después tocá «Ya inicié sesión»."})
             ok = tiktok.sesion_iniciada()
             return self._send({"ok": ok, "login": ok, "message": "Sesión de TikTok detectada y guardada ✓" if ok else "Todavía no veo la sesión de TikTok. Iniciá sesión en la ventana de Chrome y probá de nuevo."})
+        if self.path == "/aprender":                 # lo que le enseñás a la IA para escribir mejores títulos
+            a = data.get("accion")
+            try:
+                if a == "agregar": aprendizaje.agregar(data.get("texto"))
+                elif a == "borrar": aprendizaje.borrar(data.get("i", -1))
+                elif a == "evaluar":
+                    sc, pro = aprendizaje.evaluar(data.get("titulo")); return self._send({"ok": True, "puntaje": sc, "problemas": pro, "aprobado": sc >= aprendizaje.MIN})
+            except Exception as e: return self._send({"ok": False, "message": str(e)[:160]})
+            return self._send({"ok": True, "lecciones": aprendizaje.listar(), "base": aprendizaje.BASE[:400], "minimo": aprendizaje.MIN})
         if self.path == "/destinos":                 # dónde se publican los videos (YouTube siempre; Facebook y TikTok si se eligen)
             return self._send({"ok": True, "destinos": redes.guardar_destinos(data), "message": "Guardado."})
         if self.path == "/facebook-login":           # sesión de Facebook en el Chrome del worker (necesaria para buscar y descargar reels)

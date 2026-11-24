@@ -224,6 +224,16 @@ $("tm-estado").textContent=(p.activo?"🟢 Activo · ":"⏸ En pausa · ")+(p.es
 setInterval(tmPoll,8000);tmPoll();
 
 
+/* ---------- aprendizaje de títulos ---------- */
+async function apLoad(){const r=await call("/aprender",{accion:"listar"},8000);if(!r||!r.ok)return;const l=r.lecciones||[];$("ap-n").textContent=l.length?"· "+l.length+" lección"+(l.length>1?"es":"")+" tuya"+(l.length>1?"s":""):"";
+$("ap-list").innerHTML=l.map(x=>`<div class="apit"><span>${esc(x.t).replace(/\n/g,"<br>")}<small>${esc(x.f||"")}</small></span><button type="button" class="btn ghost sm" data-ap="${x.i}" title="Olvidar esta lección">✕</button></div>`).join("")}
+$("ap-add").onclick=async()=>{const m=$("ap-msg"),t=$("ap-txt").value.trim();if(!t){m.textContent="Escribí algo para enseñarle.";m.className="msg err";return}
+const r=await call("/aprender",{accion:"agregar",texto:t},8000);m.className="msg"+(r&&r.ok?"":" err");m.textContent=r?(r.ok?"Aprendido ✓ Ya lo aplica en los próximos títulos.":r.message):"No encuentro el worker. Ejecutá 2-INSTALAR-Y-EJECUTAR.bat.";if(r&&r.ok){$("ap-txt").value="";apLoad()}};
+$("ap-list").onclick=async e=>{const b=e.target.closest("[data-ap]");if(!b)return;await call("/aprender",{accion:"borrar",i:+b.dataset.ap},8000);apLoad()};
+$("ap-ev").onclick=async()=>{const t=$("ap-test").value.trim(),o=$("ap-res");if(!t)return;const r=await call("/aprender",{accion:"evaluar",titulo:t},8000);
+o.textContent=r&&r.ok?`${r.aprobado?"✅":"⚠"} ${r.puntaje}/100 `+(r.problemas.length?"· "+r.problemas.join("; "):"· claro, específico y con gancho"):"No encuentro el worker."};
+apLoad();
+
 /* ---------- dónde se publican los videos ---------- */
 const DST={fb:false,tt:false,fb_page:""};let dstOk=false;
 function dstDraw(){$("dest-fb").checked=DST.fb;$("dest-tt").checked=DST.tt;$("dd-fb").classList.toggle("on",DST.fb);$("dd-tt").classList.toggle("on",DST.tt);
@@ -286,6 +296,12 @@ cadaCtl("yts",ys,ysSave);cadaCtl("piloto",pl,()=>{try{localStorage.setItem(PL_K,
 cadaCtl("tiktok",tt,()=>{try{localStorage.setItem(TT_K,JSON.stringify(tt))}catch{}});
 cadaCtl("tema-tt",tm,()=>{try{localStorage.setItem(TM_K,JSON.stringify(tm))}catch{}});
 cadaCtl("pia",pi,piSave);cadaCtl("fb",fbo,fbSave);
+/* elegir por popularidad: más vistas / likes / comentarios / compartidos / recientes */
+function rankCtl(secId,obj,saveFn){const cfgDiv=document.querySelector("#"+secId+" .cfg");if(!cfgDiv)return;
+const lab=document.createElement("label");lab.className="wide";
+lab.innerHTML='Elegir los videos por<select><option value="auto">Automático (variados)</option><option value="vistas">👁 Más vistas</option><option value="likes">👍 Más likes</option><option value="comentarios">💬 Más comentarios</option><option value="compartidos">🔁 Más compartidos</option><option value="recientes">🆕 Más recientes</option></select><small class="sub">Toma siempre el mejor que todavía no se usó. Para likes, comentarios y compartidos consulta los datos de los mejores candidatos (tarda unos segundos más).</small>';
+cfgDiv.appendChild(lab);const sel=lab.querySelector("select");sel.value=obj.ranking||"auto";sel.onchange=()=>{obj.ranking=sel.value;saveFn()}}
+rankCtl("yts",ys,ysSave);rankCtl("tiktok",tt,()=>{try{localStorage.setItem(TT_K,JSON.stringify(tt))}catch{}});rankCtl("tema-tt",tm,()=>{try{localStorage.setItem(TM_K,JSON.stringify(tm))}catch{}});rankCtl("fb",fbo,fbSave);
 
 /* ---------- pestañas ---------- */
 const PT=["yts","piloto","tiktok","tema-tt","fb","pia"];let ptSel=load("yutu-ptab","yts");

@@ -1,4 +1,14 @@
-YUTU WORKER (v26)
+YUTU WORKER (v28)
+
+NOVEDADES v28
+- Los pilotos de Shorts de YouTube, Facebook (tema y cuenta), TikTok cuenta y TikTok tema tienen ahora «Elegir los videos por»: Automático (variados), Más vistas, Más likes, Más comentarios, Más compartidos o Más recientes. Toma siempre el mejor que todavía no se usó (nunca repite).
+  Vistas: sale de la propia lista cuando el sitio las muestra; likes/comentarios/compartidos/fecha se consultan con yt-dlp a los 10 mejores candidatos (tarda unos segundos más) y se recuerdan.
+  En el estado del piloto se ve el dato del video elegido, por ejemplo «(más likes: 12.345)». Facebook puede no mostrar likes/comentarios si la sesión no está iniciada: en ese caso queda ordenado por lo que haya.
+
+NOVEDADES v27
+- 🧠 Aprendizaje de títulos (paso 6 · Inteligencia artificial): Yutu parte de tu lección (un buen título es CLARO, ESPECÍFICO y despierta CURIOSIDAD, con los ejemplos malos/buenos) y aprende de lo que le enseñes: pegá consejos o ejemplos y se le entregan a la IA en CADA título (todos los pilotos y el Creador IA). Podés borrar lecciones y probar un título para ver su puntaje.
+- Control de calidad: cada título se puntúa (0-100: longitud, número/dato concreto, gancho, nada genérico tipo «Mi experiencia...»). Si sale flojo (menos de 60) se pide uno mejor, con el motivo, hasta 2 veces antes de subir. Sigue sin repetirse nunca.
+- Las lecciones quedan en aprendizaje.json (carpeta del worker).
 
 NOVEDADES v26
 - NUEVO panel «📤 Dónde se publican los videos» (paso 7 · Publicación): YouTube siempre, y si querés también tu Página de Facebook (Reel) y TikTok, con el MISMO título y descripción.

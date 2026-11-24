@@ -298,12 +298,27 @@ def sesion_iniciada():
     return False
 
 
+def num_corto(txt):
+    """'1.2M' / '15,3 K' / '2 mil' / '4.5B' / '1234' -> número. 0 si no es un conteo."""
+    m = re.fullmatch(r"\s*([\d][\d.,]*)\s*(k|m|b|mil|mill\.?|millones|mm)?\s*", str(txt or ""), re.I)
+    if not m: return 0
+    n, suf = m.group(1), (m.group(2) or "").lower()
+    if suf:
+        n = n.replace(",", ".")
+        if n.count(".") > 1: n = n.replace(".", "")
+    else: n = re.sub(r"[.,](?=\d{3}\b)", "", n).replace(",", ".")
+    try: v = float(n)
+    except ValueError: return 0
+    return int(v * {"k": 1e3, "mil": 1e3, "m": 1e6, "mill": 1e6, "mill.": 1e6, "millones": 1e6, "b": 1e9, "mm": 1e9}.get(suf, 1))
+
+
 JS_ESTADO = r"""(function(){var t=((document.body&&document.body.innerText)||'').slice(0,1800).toLowerCase();return JSON.stringify({u:location.href,t:t})})()"""
 JS_LISTA = r"""(function(){var o=[],seen={};document.querySelectorAll('a[href*="/video/"]').forEach(function(a){
 var h=a.href.split('?')[0];if(seen[h])return;seen[h]=1;var t=a.getAttribute('aria-label')||a.title||'';var im=a.querySelector('img');
 if(!t&&im)t=im.alt||'';if(!t){var n=a,k=0;while(n&&k<4&&!t){n=n.parentElement;k++;
 if(n&&n.querySelectorAll('a[href*="/video/"]').length===1&&n.innerText&&n.innerText.length<400)t=n.innerText}}
-o.push({h:h,t:t||''})});return JSON.stringify(o)})()"""
+var vw='';var c=a;for(var k=0;k<4&&c&&!vw;k++){var s=c.querySelector('[data-e2e="video-views"],strong[data-e2e*="views"]');if(s)vw=(s.innerText||'').trim();c=c.parentElement}
+o.push({h:h,t:t||'',vw:vw})});return JSON.stringify(o)})()"""
 JS_VIDEO = r"""(function(){var ua=navigator.userAgent;try{var s=document.getElementById('__UNIVERSAL_DATA_FOR_REHYDRATION__');
 var j=s?JSON.parse(s.textContent):null;var d=j&&j['__DEFAULT_SCOPE__']&&j['__DEFAULT_SCOPE__']['webapp.video-detail'];
 var it=d&&d.itemInfo&&d.itemInfo.itemStruct;if(it){var v=it.video||{};var u=[];
@@ -344,7 +359,7 @@ def listar(url, log=print, scrolls=8, espera=35):
         for it in items:
             m = re.search(r"/video/(\d{15,})", it.get("h", ""))
             if m and m.group(1) not in vistos:
-                vistos[m.group(1)] = {"id": m.group(1), "t": re.sub(r"\s+", " ", it.get("t", "")).strip()[:300], "dur": 0, "v": 0, "url": it["h"]}
+                vistos[m.group(1)] = {"id": m.group(1), "t": re.sub(r"\s+", " ", it.get("t", "")).strip()[:300], "dur": 0, "v": num_corto(it.get("vw")), "url": it["h"]}
     try:
         tab = _tab(url); time.sleep(3)
         fin = time.time() + espera; avisado = False

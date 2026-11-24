@@ -138,3 +138,6 @@ footer{text-align:center;color:#5f7089;padding:20px 0 90px;font-size:13px}
 .dchip{display:flex;flex-direction:column;gap:2px;position:relative;padding:12px 14px;border:1px solid var(--bd);border-radius:12px;background:var(--in);cursor:pointer;transition:border-color .2s,background .2s}
 .dchip input{position:absolute;opacity:0;pointer-events:none}.dchip b{font-size:14px}.dchip small{color:var(--mu);font-size:12px}
 .dchip.on{border-color:var(--mint);background:#0e2a26}.dchip.on b::after{content:" ✓";color:var(--mint)}.dchip.lock{cursor:default}
+
+.aplist{display:grid;gap:8px}.apit{display:flex;gap:10px;align-items:flex-start;justify-content:space-between;background:var(--in);border:1px solid var(--bd);border-radius:11px;padding:9px 12px;font-size:13px;color:var(--tx)}
+.apit small{display:block;color:var(--mu);font-size:11px;margin-top:3px}.apit .btn{flex:none;padding:2px 9px}

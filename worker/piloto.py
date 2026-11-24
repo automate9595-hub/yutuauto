@@ -29,6 +29,58 @@ def _rango(d):
     f = lambda k: max(0, min(int(d.get(k, 0) or 0), 86400))
     return {"dmin": f("dmin"), "dmax": f("dmax")}
 
+# ---- elegir por popularidad: más vistas / likes / comentarios / compartidos / recientes
+RANKINGS = ("auto", "vistas", "likes", "comentarios", "compartidos", "recientes")
+RK_NOM = {"vistas": "más vistas", "likes": "más likes", "comentarios": "más comentarios", "compartidos": "más compartidos", "recientes": "más recientes"}
+RK_CLAVE = {"vistas": "views", "likes": "likes", "comentarios": "comments", "compartidos": "shares", "recientes": "ts"}
+
+def _rank(d, p=None):
+    r = d.get("ranking", (p or {}).get("ranking", "auto"))
+    return {"ranking": r if r in RANKINGS else "auto"}
+
+def _vistas(v): return v.get("views") or v.get("v") or 0
+
+def _enriquecer(v, p):
+    """Datos reales del video (vistas, likes, comentarios, compartidos, fecha) con yt-dlp. Se recuerdan para no pedirlos dos veces."""
+    cache = p.setdefault("metr", {}); m = cache.get(v["id"])
+    if m is None:
+        try:
+            j = json.loads(tiktok.ytdlp_texto(["-j", "--no-playlist", "--no-warnings"], v.get("url") or ("https://www.youtube.com/watch?v=" + v["id"]), timeout=60).strip().splitlines()[-1])
+            ts = j.get("timestamp") or 0
+            if not ts and j.get("upload_date"):
+                try: ts = dt.datetime.strptime(j["upload_date"], "%Y%m%d").timestamp()
+                except Exception: pass
+            m = {"views": j.get("view_count") or 0, "likes": j.get("like_count") or 0, "comments": j.get("comment_count") or 0,
+                 "shares": j.get("repost_count") or 0, "ts": ts, "dur": j.get("duration") or 0}
+        except Exception: m = {}
+        cache[v["id"]] = m
+        if len(cache) > 800:
+            for k in list(cache)[:200]: cache.pop(k, None)
+    for k, x in m.items():
+        if x and not v.get(k): v[k] = x
+    return v
+
+def ordenar_por(p, cand, log=print, n=10):
+    """Ordena los candidatos según p['ranking']. 'auto' = como venían (variados). Si el dato no viene en la lista, se consulta de los n más prometedores."""
+    r = p.get("ranking", "auto")
+    if r not in RK_CLAVE or not cand: return cand
+    k = RK_CLAVE[r]; cand = sorted(cand, key=lambda v: -_vistas(v))            # lo más visto primero: ahí es más probable que esté lo mejor
+    top = cand[:n]; faltan = [v for v in top if not (_vistas(v) if k == "views" else v.get(k))]
+    if faltan:
+        log(f"Ordenando por {RK_NOM[r]}: consulto los datos de {len(faltan)} videos…")
+        import concurrent.futures as cf
+        with cf.ThreadPoolExecutor(4) as ex: list(ex.map(lambda v: _enriquecer(v, p), faltan))
+    val = (lambda v: _vistas(v)) if k == "views" else (lambda v: v.get(k) or 0)
+    top.sort(key=lambda v: -val(v))
+    return top + cand[n:]
+
+def _etiq_rank(p, v):
+    r = p.get("ranking", "auto")
+    if r not in RK_CLAVE: return ""
+    k = RK_CLAVE[r]; x = _vistas(v) if k == "views" else v.get(k)
+    if not x: return ""
+    return f" ({RK_NOM[r]}: {dt.datetime.fromtimestamp(x).strftime('%d/%m/%Y') if k == 'ts' else format(int(x), ',').replace(',', '.')})"
+
 def _duracion(url):
     """Duración en segundos sin gastar de más (yt-dlp rápido y, si no, la página en el Chrome oculto). 0 = no se pudo saber."""
     return tiktok.duracion(url)
@@ -39,7 +91,7 @@ def limpiar_memoria():
     """Borra lo ya usado/rechazado, el historial y las fuentes de TODOS los pilotos. Conserva su configuración y el cupo de hoy."""
     n = 0
     for f, claves in ((PF, ("usados", "hist")), (TF, ("usados", "rechazados", "hist", "lista")), (PTF, ("usados", "rechazados", "hist", "fuentes", "muertas", "cache")),
-                      (YF, ("usados", "hist")), (FF, ("usados", "rechazados", "hist", "fuentes", "muertas", "cache", "lista")), (ROOT / "piloto-ia.json", ("ideas", "hist"))):
+                      (YF, ("usados", "hist", "metr")), (FF, ("usados", "rechazados", "hist", "fuentes", "muertas", "cache", "lista", "metr")), (ROOT / "piloto-ia.json", ("ideas", "hist"))):
         try: d = json.loads(f.read_text("utf-8"))
         except Exception: continue
         for k in claves:
@@ -140,7 +192,7 @@ def configurar_tt(d):
     if cuenta != p.get("cuenta"): p.update(cuenta=cuenta, lista=[], lista_t=0, rechazados=[], inicio=None, hoy={})
     if d.get("activo") and not p.get("lista"): p["lista_t"] = 0          # al activar, reintenta la lectura enseguida
     p.update(activo=bool(d.get("activo")), cuenta=cuenta, orden=d.get("orden") if d.get("orden") in ("seguidilla", "aleatorio", "relevantes") else "seguidilla",
-             por_dia=max(1, min(int(d.get("por_dia", 5)), 60)), dias=max(1, min(int(d.get("dias", 30)), 365)), verificar=bool(d.get("verificar", True)), cada=max(0, min(int(d.get("cada", 0) or 0), 1440)), **_rango(d))
+             por_dia=max(1, min(int(d.get("por_dia", 5)), 60)), dias=max(1, min(int(d.get("dias", 30)), 365)), verificar=bool(d.get("verificar", True)), cada=max(0, min(int(d.get("cada", 0) or 0), 1440)), **_rango(d), **_rank(d, p))
     if p["activo"] and not p.get("inicio"): p["inicio"] = dt.date.today().isoformat()
     for k in ("usados", "rechazados", "hist", "lista"): p.setdefault(k, [])
     guardar_tt(p); return p
@@ -208,6 +260,7 @@ def tick_tt(items_existentes, log=print):
     if not libres: p["estado"] = "Ya se usaron todos los videos válidos de la cuenta."; guardar_tt(p); log("TikTok: " + p["estado"]); return []
     if p["orden"] == "aleatorio": random.shuffle(libres)
     elif p["orden"] == "relevantes": libres.sort(key=lambda v: -(v.get("v") or 0))
+    if p.get("ranking", "auto") in RK_CLAVE: libres = ordenar_por(p, libres[:40], log)
     elegido = None
     for v in libres[:15]:
         if not en_rango(p, v): p["rechazados"].append(v["id"]); log(f"TikTok: descartado por duración ({v.get('dur')} s): {v['t'][:40]}"); continue
@@ -217,7 +270,7 @@ def tick_tt(items_existentes, log=print):
     if not elegido: p["estado"] = "Los videos revisados no eran de Mobile Legends; sigo con otros en el próximo ciclo."; guardar_tt(p); return []
     p["usados"].append(elegido["id"]); h["n"] += 1; h["ultimo"] = time.time()
     p["hist"] = (p.get("hist", []) + [{"id": elegido["id"], "t": elegido["t"][:80], "d": hoy.isoformat()}])[-200:]
-    p["estado"] = f"Día {dia}/{p['dias']}: tomé «{elegido['t'][:50]}». {h['n']}/{p['por_dia']} hoy."; guardar_tt(p); log("TikTok: " + p["estado"])
+    p["estado"] = f"Día {dia}/{p['dias']}: tomé «{elegido['t'][:50]}»{_etiq_rank(p, elegido)}. {h['n']}/{p['por_dia']} hoy."; guardar_tt(p); log("TikTok: " + p["estado"])
     return [{"type": "video", "id": elegido["id"], "key": "video:" + elegido["id"], "kind": "short", "url": elegido["url"], "status": "pending", "n": 1, "auto": True, "origen": "tiktok", "piloto": "tt", "dmin": p.get("dmin", 0), "dmax": p.get("dmax", 0)}]
 
 
@@ -235,7 +288,7 @@ def configurar_tm(d):
     p = leer_tm(); tema = str(d.get("tema", p.get("tema", ""))).strip()[:120]
     if tema != p.get("tema"): p.update(tema=tema, fuentes=[], muertas=[], cache={}, rechazados=[], inicio=None, hoy={})
     p.update(activo=bool(d.get("activo")), tema=tema, shorts=max(0, min(int(d.get("shorts", 10)), 60)),
-             videos=max(0, min(int(d.get("videos", 3)), 30)), dias=max(1, min(int(d.get("dias", 30)), 365)), cada=max(0, min(int(d.get("cada", 0) or 0), 1440)), **_rango(d))
+             videos=max(0, min(int(d.get("videos", 3)), 30)), dias=max(1, min(int(d.get("dias", 30)), 365)), cada=max(0, min(int(d.get("cada", 0) or 0), 1440)), **_rango(d), **_rank(d, p))
     if p["activo"] and not p.get("inicio"): p["inicio"] = dt.date.today().isoformat()
     for k in ("usados", "rechazados", "hist", "fuentes", "muertas"): p.setdefault(k, [])
     p.setdefault("cache", {}); guardar_tm(p); return p
@@ -335,13 +388,14 @@ def tick_tm(items_existentes, log=print):
             p["cache"][f] = lst
         cand = [v for v in p["cache"][f] if v["id"] not in ya]
         if kind == "video": cand = [v for v in cand if not v["dur"] or v["dur"] >= 60] or cand
-        random.shuffle(cand)
+        if p.get("ranking", "auto") in RK_CLAVE: cand = ordenar_por(p, cand[:40], lambda m: log("TikTok tema: " + m))
+        else: random.shuffle(cand)
         for v in cand[:8]:
             if not en_rango(p, v): p["rechazados"].append(v["id"]); ya.add(v["id"]); cont["dur"] += 1; continue
             if v["t"] and not es_del_tema(v["t"], p["tema"]): p["rechazados"].append(v["id"]); ya.add(v["id"]); cont["tema"] += 1; continue      # sin texto: se acepta (la fuente ya es del tema)
             p["usados"].append(v["id"]); h[kind] += 1; h["ultimo"] = time.time()
             p["hist"] = (p.get("hist", []) + [{"id": v["id"], "t": v["t"][:80], "f": f, "k": kind, "d": hoy.isoformat()}])[-200:]
-            p["estado"] = f"Día {dia}/{p['dias']}: {kind} de {f}. Shorts {h['short']}/{p['shorts']} · Videos {h['video']}/{p['videos']}"
+            p["estado"] = f"Día {dia}/{p['dias']}: {kind} de {f}{_etiq_rank(p, v)}. Shorts {h['short']}/{p['shorts']} · Videos {h['video']}/{p['videos']}"
             guardar_tm(p); log("TikTok tema: " + p["estado"])
             return [{"type": "video", "id": v["id"], "key": "video:" + v["id"], "kind": kind, "url": v["url"], "status": "pending", "n": 1, "auto": True, "origen": "tiktok", "piloto": "tm", "dmin": p.get("dmin", 0), "dmax": p.get("dmax", 0)}]
         if not [v for v in p["cache"][f] if v["id"] not in ya] and f not in p["muertas"]: p["muertas"].append(f)
@@ -363,7 +417,7 @@ def configurar_ys(d):
     p = leer_ys(); hoy = dt.date.today().isoformat(); tema = str(d.get("tema", p.get("tema", ""))).strip()[:120]
     if tema != p.get("tema"): p.update(inicio=None, hoy={}, variante=0)
     p.update(activo=bool(d.get("activo")), tema=tema, por_dia=max(1, min(int(d.get("por_dia", 5)), 60)), dias=max(1, min(int(d.get("dias", 30)), 365)),
-             cada=max(0, min(int(d.get("cada", 0) or 0), 1440)), **_rango(d))
+             cada=max(0, min(int(d.get("cada", 0) or 0), 1440)), **_rango(d), **_rank(d, p))
     if p["activo"] and not p.get("inicio"): p["inicio"] = hoy
     for k in ("usados", "hist"): p.setdefault(k, [])
     guardar_ys(p); return p
@@ -382,15 +436,22 @@ def tick_ys(items_existentes, log=print):
     falta = gap - (time.time() - h["ultimo"])
     if falta > 0: p["estado"] = f"Día {dia}/{p['dias']}: {h['n']}/{p['por_dia']} hoy · próximo en {int(falta // 60) + 1} min."; guardar_ys(p); return []
     ya = {i.get("id") for i in items_existentes}; tema = p["tema"]; v0 = p.get("variante", 0); pick = None
+    rk = p.get("ranking", "auto") in RK_CLAVE; pool = []
     for k in range(len(VAR_YS)):
         try: res = _buscar(VAR_YS[(v0 + k) % len(VAR_YS)].format(t=tema), 40)
         except Exception: continue
         ok = [r for r in res if r["id"] not in ya and r["id"] not in p["usados"] and (p.get("dmin") or 8) <= (r["dur"] or 0) <= (p.get("dmax") or 180)]
-        if ok: pick = ok[0]; p["variante"] = (v0 + k + 1) % len(VAR_YS); break
+        if ok and not rk: pick = ok[0]; p["variante"] = (v0 + k + 1) % len(VAR_YS); break
+        if ok:                                              # por popularidad: se juntan varias búsquedas y se elige el mejor de todos
+            pool += [r for r in ok if r["id"] not in {x["id"] for x in pool}]; p["variante"] = (v0 + k + 1) % len(VAR_YS)
+            if k >= 2 and pool: break
+    if rk and pool:
+        for r in pool: r.setdefault("url", "https://www.youtube.com/watch?v=" + r["id"]); r["t"] = r.get("title", "")
+        pick = ordenar_por(p, pool, lambda m: log("Piloto YouTube Shorts: " + m))[0]
     if not pick: p["estado"] = "No encontré Shorts nuevos de ese tema; pruebo otra búsqueda en el próximo ciclo."; guardar_ys(p); log("Piloto YouTube Shorts: " + p["estado"]); return []
     p["usados"] = (p["usados"] + [pick["id"]])[-3000:]; h["n"] += 1; h["ultimo"] = time.time()
     p["hist"] = (p.get("hist", []) + [{"id": pick["id"], "t": pick["title"][:80], "d": hoy.isoformat()}])[-200:]
-    p["estado"] = f"Día {dia}/{p['dias']}: agregué «{pick['title'][:50]}» ({h['n']}/{p['por_dia']} hoy)."
+    p["estado"] = f"Día {dia}/{p['dias']}: agregué «{pick['title'][:50]}»{_etiq_rank(p, pick)} ({h['n']}/{p['por_dia']} hoy)."
     guardar_ys(p); log("Piloto YouTube Shorts: " + p["estado"])
     return [{"type": "video", "id": pick["id"], "key": "video:" + pick["id"], "kind": "short", "url": "https://www.youtube.com/watch?v=" + pick["id"],
              "status": "pending", "n": 1, "auto": True, "origen": "yt-shorts", "piloto": "ys", "dmin": p.get("dmin", 0), "dmax": p.get("dmax", 0)}]
@@ -456,7 +517,7 @@ def configurar_fb(d):
     if (modo, tema, cuenta) != (p.get("modo"), p.get("tema"), p.get("cuenta")): p.update(fuentes=[], muertas=[], cache={}, rechazados=[], lista=[], lista_t=0, inicio=None, hoy={})
     p.update(activo=bool(d.get("activo")), modo=modo, tema=tema, cuenta=cuenta, shorts=max(0, min(int(d.get("shorts", 10)), 60)),
              videos=max(0, min(int(d.get("videos", 0)), 30)), dias=max(1, min(int(d.get("dias", 30)), 365)), cada=max(0, min(int(d.get("cada", 0) or 0), 1440)),
-             verificar=bool(d.get("verificar", True)), **_rango(d))
+             verificar=bool(d.get("verificar", True)), **_rango(d), **_rank(d, p))
     if p["activo"] and not p.get("inicio"): p["inicio"] = dt.date.today().isoformat()
     if p["activo"]: p["lista_t"] = 0
     for k in ("usados", "rechazados", "hist", "fuentes", "muertas", "lista"): p.setdefault(k, [])
@@ -503,7 +564,9 @@ def tick_fb(items_existentes, log=print):
     cuenta = p.get("modo") == "cuenta"
     def libres(lst): return [v for v in lst if ("fb" + v["id"]) not in ya]
     def elegir_de(lst, origen):
-        cand = libres(lst); random.shuffle(cand); contd = {"dur": 0, "tema": 0, "rep": 0}
+        cand = libres(lst); contd = {"dur": 0, "tema": 0, "rep": 0}
+        if p.get("ranking", "auto") in RK_CLAVE: cand = ordenar_por(p, cand[:40], lambda m: log("Facebook: " + m))
+        else: random.shuffle(cand)
         for v in cand[:10]:
             vid = "fb" + v["id"]
             if v["t"] and len(_norm_t(v["t"])) > 12 and _norm_t(v["t"]) in tit: p["rechazados"].append(vid); ya.add(vid); contd["rep"] += 1; continue       # mismo título: no se repite
@@ -514,7 +577,7 @@ def tick_fb(items_existentes, log=print):
     def tomar(v, origen):
         vid = "fb" + v["id"]; p["usados"].append(vid); h[kind] += 1; h["ultimo"] = time.time()
         p["hist"] = (p.get("hist", []) + [{"id": vid, "t": v["t"][:80], "f": origen, "k": kind, "d": hoy.isoformat()}])[-300:]
-        p["estado"] = f"Día {dia}/{p['dias']}: {kind} de {origen}. Shorts {h['short']}/{p['shorts']} · Videos {h['video']}/{p['videos']}"
+        p["estado"] = f"Día {dia}/{p['dias']}: {kind} de {origen}{_etiq_rank(p, v)}. Shorts {h['short']}/{p['shorts']} · Videos {h['video']}/{p['videos']}"
         guardar_fb(p); log("Facebook: " + p["estado"])
         return [{"type": "video", "id": vid, "key": "video:" + vid, "kind": kind, "url": v["url"], "status": "pending", "n": 1, "auto": True, "origen": "facebook", "piloto": "fb",
                  "dmin": p.get("dmin", 0), "dmax": p.get("dmax", 0), "title": v["t"][:120]}]

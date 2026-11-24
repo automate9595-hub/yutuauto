@@ -1,7 +1,7 @@
 """Yutu worker: descarga -> recorte -> efectos -> subtitulos -> subida a YouTube Studio (sin Google Cloud)."""
 import json, math, os, re, shutil, subprocess, sys, time, pathlib, urllib.request, datetime as dt
 import threading, concurrent.futures as cf
-import efectos, ia, voz, cdp, titulos, tiktok, redes
+import efectos, ia, voz, cdp, titulos, tiktok, redes, aprendizaje
 ROOT = pathlib.Path(__file__).parent
 MEDIA = ROOT / "media"; MEDIA.mkdir(exist_ok=True)
 QF = ROOT / "queue.json"; CF = ROOT / "cancel.json"
@@ -766,6 +766,17 @@ def textos_para_subir(it, cfg):
         tema = (cfg or {}).get("tema_titulo", "") or ("Mobile Legends" if "mobile legends" in (original + " " + texto).lower() else "")
         t = titulos.fallback(texto, tema, prohibidos, len(titulos.usados()) + 1)
         print("  Título propio (sin IA disponible):", t)
+    if activa and t:                           # control de calidad: claro, específico y con razón para hacer clic (lo que Yutu aprendió); si es flojo se pide uno mejor
+        sc, probs = aprendizaje.evaluar(t)
+        for _ in range(2):
+            if sc >= aprendizaje.MIN: break
+            print(f"  Título flojo ({sc}/100: {'; '.join(probs)[:110]}): pido uno mejor.")
+            try:
+                r = ia.textos(modo, original or it.get("title", ""), texto, it.get("kind", "video"), prohibidos + [t], (cfg or {}).get("idioma_titulo", ""), (), "; ".join(probs))
+            except Exception: r = None
+            if not r or titulos.repetido(r["titulo"], prohibidos + [t]): continue
+            sc2, pr2 = aprendizaje.evaluar(r["titulo"])
+            if sc2 > sc: t, desc, sc, probs = r["titulo"].strip(), r["descripcion"].strip(), sc2, pr2; print(f"  [IA {r['prov']}] Título mejorado ({sc}/100): {t}")
     otras = titulos.descripciones_usadas() + [i.get("ia_desc") for i in (D["items"] if D else []) if i is not it and i.get("ia_desc") and i.get("final_title")]
     for _ in range(3):                         # la descripcion tampoco puede ser igual a la de otro video
         if desc and not titulos.desc_repetida(desc, otras): break

@@ -191,6 +191,13 @@
 <input id="k-claude" type="password" placeholder="Pegá la clave de Claude" autocomplete="off">
 <div class="row"><button class="btn pri sm" data-ia="claude" data-a="save">Guardar clave</button><button class="btn ghost sm" data-ia="claude" data-a="test">Probar</button><button class="btn ghost sm danger" data-ia="claude" data-a="del">Borrar</button></div>
 <p class="sub">Si dice que falta crédito: la API de Claude se carga aparte en console.anthropic.com (la suscripción de Claude.ai no la incluye). Mientras tanto se salta sola.</p></div></div>
+<div class="grp open"><button class="grp-h" type="button">🧠 Aprendizaje de títulos <small id="ap-n"></small></button><div class="grp-b cfg">
+<p class="sub" style="margin:0">Yutu ya sabe que un buen título es <b>claro, específico y despierta curiosidad</b> (con tus ejemplos malos y buenos). Todo lo que le enseñes acá se le entrega a la IA en <b>cada título</b>, y si un título sale flojo se pide otro mejor antes de subir.</p>
+<textarea id="ap-txt" rows="4" style="width:100%;background:var(--in);color:var(--tx);border:1px solid var(--bd);border-radius:11px;padding:10px" placeholder="Pegá un consejo, una regla o ejemplos (❌ malo / ✅ bueno) para que Yutu aprenda…"></textarea>
+<div class="row"><button class="btn pri sm" id="ap-add" type="button">Enseñarle esto</button><span id="ap-msg" class="msg"></span></div>
+<div id="ap-list" class="aplist"></div>
+<div class="row"><input id="ap-test" type="text" placeholder="Probá un título para ver qué puntaje le da" style="flex:1;min-width:220px" autocomplete="off"><button class="btn ghost sm" id="ap-ev" type="button">Evaluar</button></div>
+<small id="ap-res" class="sub"></small></div></div>
 <small id="ia-msg" class="msg"></small>
 <div class="nav-step"><button class="btn ghost" data-go="5" type="button">← Atrás</button><button class="btn pri" data-go="7" type="button">Siguiente: publicación →</button></div></div></section>
 

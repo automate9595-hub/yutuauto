@@ -5,7 +5,7 @@ se prueba con la otra y, si tampoco, la edicion sigue con tu configuracion norma
 Las claves viven solo en claves-ia.json (esta carpeta). No se suben a GitHub ni salen en la web.
 """
 import json, os, pathlib, re, socket, time, urllib.error, urllib.request
-import efectos
+import efectos, aprendizaje
 
 ROOT = pathlib.Path(__file__).parent
 KF = ROOT / "claves-ia.json"
@@ -319,7 +319,7 @@ Responde SOLO este JSON: {{"fx_list": ["id", ...], "fx_mode": "seq|overlap|rando
                 "motivo": str(data.get("motivo", ""))[:120]}
     except Exception: return None
 
-def textos(modo, titulo, texto, kind, prohibidos=(), idioma="", descs=()):
+def textos(modo, titulo, texto, kind, prohibidos=(), idioma="", descs=(), feedback=""):
     """Titulo y descripcion NUEVOS: nunca iguales al original ni a los ya usados (lista 'prohibidos')."""
     pro = "\n".join("- " + str(x)[:100] for x in list(prohibidos)[-40:]) or "(ninguno)"
     data, p = pedir(f'''Eres editor de YouTube. Escribe un título y una descripción para este {"Short" if kind == "short" else "video"}.
@@ -328,6 +328,8 @@ Títulos que YA se usaron (el tuyo debe ser claramente distinto de todos, con ot
 {pro}
 Descripciones que YA se usaron (la tuya NO puede repetir sus frases ni su estructura; escribe otra distinta basada en este clip):
 {chr(10).join("- " + str(x)[:120].replace(chr(10), " ") for x in list(descs)[-12:]) or "(ninguna)"}
+{aprendizaje.guia()}
+{("OJO, el título anterior salió flojo: " + feedback + " Escribí uno claramente mejor.") if feedback else ""}
 Reglas: {("idioma: " + idioma + ".") if idioma else "mismo idioma del contenido."} Título atractivo de máximo 90 caracteres basado en lo que PASA en este clip, sin mentiras ni promesas falsas, sin inventar datos; descripción de 2 a 3 frases y 3 a 5 hashtags al final.
 Responde SOLO este JSON: {{"titulo": "...", "descripcion": "..."}}''', modo)
     try:
