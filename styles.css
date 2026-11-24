@@ -126,3 +126,9 @@ footer{text-align:center;color:#5f7089;padding:20px 0 90px;font-size:13px}
 .durbox .sumr{grid-column:1/-1;margin:0;padding:10px 12px;border-radius:10px;background:#12304a55;color:var(--mint);font-size:14px;font-weight:600}
 @media(max-width:560px){.durbox{grid-template-columns:1fr}}
 .durbox input[type=number]{-moz-appearance:textfield;appearance:textfield;padding-right:52px}.durbox input::-webkit-outer-spin-button,.durbox input::-webkit-inner-spin-button{-webkit-appearance:none;margin:0}
+
+#cdwrap{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:12px;margin-bottom:14px}#cdwrap:empty{display:none}
+.cd{background:linear-gradient(160deg,#10203a,var(--card));border:1px solid var(--bd);border-radius:18px;padding:16px 20px;text-align:center}
+.cd small{display:block;color:var(--mu);font-size:12px;letter-spacing:.08em;text-transform:uppercase}
+.cd strong{display:block;font-size:clamp(40px,9vw,64px);font-weight:800;line-height:1.1;color:var(--mint);font-variant-numeric:tabular-nums;letter-spacing:.02em}
+.cd span{display:block;color:var(--mu);font-size:13px;margin-top:4px}.cd.busy strong{color:var(--blue)}.cd.done strong{color:var(--mu)}

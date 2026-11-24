@@ -109,6 +109,13 @@ class Tab:
                 if "error" in msg: raise RuntimeError(f"{method}: {msg['error'].get('message')}")
                 return msg.get("result", {})
 
+    def ventana(self, estado):
+        """Minimiza ('minimized') o restaura ('normal') la ventana de Chrome que contiene esta pestaña. Devuelve True si pudo."""
+        try:
+            w = self.call("Browser.getWindowForTarget", {"targetId": self.id}, 8)["windowId"]
+            self.call("Browser.setWindowBounds", {"windowId": w, "bounds": {"windowState": estado}}, 8); return True
+        except Exception: return False
+
     def esperar_evento(self, metodo, timeout=10):
         """Espera un evento de Chrome (p. ej. 'Page.fileChooserOpened'). Devuelve sus parámetros o None."""
         end = time.time() + timeout

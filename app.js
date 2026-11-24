@@ -112,12 +112,23 @@ const setPill=(id,s,t)=>{const e=$(id);e.className="pill "+s;e.lastChild.textCon
 const GO_TXT="Procesar y publicar todo ⚡";
 function setBusy(b){["start","start-up","dock-go"].forEach(i=>$(i).disabled=b);$("start-up").textContent=b?"Procesando…":GO_TXT;$("dock-go").textContent=b?"Procesando…":GO_TXT;$("start").textContent=b?"Procesando…":"Solo editar (sin subir) ▶";
 $("sum-8").textContent=b?"En marcha: no hace falta tocar nada":"Todo automático"}
+/* Cuenta regresiva grande hasta el próximo Short de cada piloto (se cuenta desde que termina la subida) */
+const CD={list:[],off:0,t:null};
+function cdFmt(s){s=Math.max(0,Math.round(s));const h=Math.floor(s/3600),m=Math.floor(s%3600/60),x=s%60,p=n=>String(n).padStart(2,"0");return (h?h+":"+p(m):p(m))+":"+p(x)}
+function cdSet(l,ahora){CD.list=l||[];CD.off=ahora?(Date.now()/1000-ahora):0;cdDraw();if(!CD.t)CD.t=setInterval(cdDraw,1000)}
+function cdDraw(){const w=$("cdwrap");if(!w)return;const now=Date.now()/1000-CD.off;
+w.innerHTML=CD.list.map(p=>{let big,sub,cl="cd";
+if(p.cupo){big="✔";sub="Cupo de hoy completo ("+p.hecho+"/"+p.tope+")";cl+=" done"}
+else if(p.enCurso){big="⏳";sub="Procesando y subiendo… el intervalo empieza al terminar";cl+=" busy"}
+else if(!p.proximo){big="00:00";sub="Buscando el próximo video…"}
+else{const f=p.proximo-now;if(f<=0){big="00:00";sub="Buscando el próximo video…"}else{big=cdFmt(f);sub="Próximo Short · cada "+fmtDur(p.gap)+" · "+p.hecho+"/"+p.tope+" hoy"}}
+return `<div class="${cl}"><small>${p.nombre}</small><strong>${big}</strong><span>${sub}</span></div>`}).join("")}
 async function poll(){
 if(!document.hidden){const s=await call("/status");
 if(!s){W.fallos=(W.fallos||0)+1;if(W.fallos<3){setTimeout(poll,2500);return}W.worker=false;W.yt=false;W.running=false;setPill("p-worker","","Worker apagado");setPill("p-yt","","Canal sin conectar");setBusy(false);$("dock-msg").textContent="Worker apagado: ejecutá 2-INSTALAR-Y-EJECUTAR.bat"}
 else{W.fallos=0;W.worker=true;W.yt=!!s.youtube;W.running=s.running;setPill("p-worker","ok","Worker conectado");
 setPill("p-yt",s.youtube?"ok":"",s.youtube?"Canal conectado":"Canal sin conectar");
-$("yt-detail").textContent=s.youtube?"":(s.detail||"");pubRender(s.items||[]);if(s.ia)iaTxt(s.ia);$("log").textContent=s.log.length?s.log.join("\n"):"Sin actividad todavía.";$("log").scrollTop=1e9;setBusy(s.running);
+$("yt-detail").textContent=s.youtube?"":(s.detail||"");pubRender(s.items||[]);cdSet(s.proximos||[],s.ahora);if(s.ia)iaTxt(s.ia);$("log").textContent=s.log.length?s.log.join("\n"):"Sin actividad todavía.";$("log").scrollTop=1e9;setBusy(s.running);
 const act=(s.items||[]).find(i=>["processing","uploading"].includes(i.status));
 $("dock-msg").textContent=s.running?(act?`${act.stage||"Procesando"} · ${Math.round(act.pct||0)} %${act.title?" · "+act.title:""}`:"Procesando…"):(s.youtube?"Listo para procesar":"Falta conectar el canal (paso 1)")}
 sums()}

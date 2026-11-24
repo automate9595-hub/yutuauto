@@ -978,7 +978,7 @@ def _detalles(tab, it, titulo, cuerpo, chk):
 
 JS_DLG_TXT = r"""(function(){var a=window.__A('ytcp-video-share-dialog,ytcp-uploads-dialog,tp-yt-paper-dialog,ytcp-dialog');
 for(var i=0;i<a.length;i++){var r=a[i].getBoundingClientRect();if(r.width>0&&r.height>0){var t=a[i].innerText||'';if(t.trim())return t}}return ''})()"""
-RE_VENTANA_FINAL = re.compile(r"se est[aá] procesando|v[ií]deo publicado|video published|processing|procesamiento|enlace del v", re.I)
+RE_VENTANA_FINAL = re.compile(r"se est[aá] procesando|v[ií]deo publicado|se ha publicado|video published|processing|procesamiento|enlace del v", re.I)
 
 def cerrar_cuando_completo(tab, it, t0, size_mb, chk, limite=1200):
     """Ventana final ('Se está procesando el vídeo' / 'Vídeo publicado'): SOLO cuando el pie dice 'Comprobaciones completadas' toca 'Cerrar'.
@@ -997,7 +997,7 @@ def cerrar_cuando_completo(tab, it, t0, size_mb, chk, limite=1200):
             if sin_ventana >= 6: return True                  # no hay ventana: ya se cerró sola
             time.sleep(1); continue
         sin_ventana = 0
-        if re.search(r"comprobaciones completadas|checks complete|no se han encontrado problemas|no issues found", txt, re.I):      # SOLO con 'Comprobaciones completadas'
+        if re.search(r"comprobaciones completadas|checks complete|no se han encontrado problemas|no issues found|se ha publicado el v[ií]deo|video published", txt, re.I):      # SOLO con 'Comprobaciones completadas'
             try:
                 link = tab.eval("(function(){var a=window.__A(\"a[href*='youtu.be/'],a[href*='youtube.com/shorts/'],a[href*='youtube.com/watch']\");for(var i=0;i<a.length;i++){var r=a[i].getBoundingClientRect();if(r.width>0)return a[i].href}return ''})()")
                 if link: it["yt_url"] = link
@@ -1153,6 +1153,38 @@ def _reanudar(tab, cid, it, chk, titulo, cuerpo, now_mode, when, size_mb):
         esperar_fin_subida(tab, it, t0, size_mb, chk); it["_subida_ok"] = True
         _terminar_borrador(tab, cid, it, chk, now_mode, when)
 
+def video_publico(vid):
+    """True/False si YouTube muestra el video públicamente (oEmbed: sin abrir el navegador); None si no se pudo saber (sin internet, etc.)."""
+    if not vid: return None
+    try:
+        urllib.request.urlopen(f"https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v={vid}&format=json", timeout=12).read(); return True
+    except urllib.error.HTTPError as e: return False if e.code in (401, 403, 404) else None
+    except Exception: return None
+
+def _minimizar(tab):
+    """Terminada la subida: Chrome se minimiza y queda a la vista la web de Yutu con la cuenta regresiva."""
+    try:
+        if tab.ventana("minimized"): print("  Subida terminada: minimicé la ventana de Chrome.")
+    except Exception: pass
+
+def _fin_piloto(it):
+    """Avisa al piloto dueño del video que la subida terminó: desde ahora corre su cuenta regresiva."""
+    try:
+        if it.get("piloto"):
+            import piloto; piloto.marcar_fin({it["piloto"]: time.time()})
+    except Exception: pass
+
+def _dar_por_subido(it, now_mode, confirmado):
+    """La subida ya terminó (o el video ya está en YouTube): se cierra como hecha y NO se repite."""
+    vid = it.get("_draft")
+    if vid: it["yt_url"] = f"https://youtu.be/{vid}"
+    for k in ("reanudar", "reintentos", "reanudar_en", "_subida_ok", "_draft", "error"): it.pop(k, None)
+    it["status"] = "published" if now_mode else "scheduled"; it["pct"] = 100; it["stage"] = "Publicado" if now_mode else "Programado"; it.pop("est", None)
+    if confirmado or not now_mode: it.pop("aviso", None)
+    else: it["aviso"] = "Subido a YouTube; no pude confirmar su visibilidad (si no figura público, revisalo en Studio)."
+    it["fin_t"] = time.time(); _fin_piloto(it)
+    if D is not None: save(D)
+
 def studio_upload_one(tab, cid, it, cfg=None, cortadas=None):
     titulo, desc = textos_para_subir(it, cfg)
     cuerpo = (desc + "\n\n" if desc else "") + ("#Shorts" if it["kind"] == "short" and "#shorts" not in desc.lower() else "")
@@ -1163,6 +1195,10 @@ def studio_upload_one(tab, cid, it, cfg=None, cortadas=None):
     chk = lambda: check_cancel(it)
     auto = (cfg or {}).get("auto_reanudar", True)
     maxi = MAX_INTENTOS if auto else 1
+    if it.get("_draft") and video_publico(it["_draft"]) is True:                  # ya se había subido en un intento anterior: no se repite
+        print("  Ese video ya está público en YouTube: no lo subo otra vez."); _dar_por_subido(it, now_mode, True); _minimizar(tab); return
+    try: tab.ventana("normal")                                                   # si quedó minimizada de la subida anterior
+    except Exception: pass
     it["status"] = "uploading"; it.pop("error", None); it.pop("yt_url", None); set_prog(it, "up", 0.0, True)
     nombre = pathlib.Path(it["file"]).name.lower()
     if it.get("_subida_ok") and it.get("_draft"): modo = "borrador"
@@ -1177,12 +1213,21 @@ def studio_upload_one(tab, cid, it, cfg=None, cortadas=None):
             elif modo == "borrador": _terminar_borrador(tab, cid, it, chk, now_mode, when)
             else: _subir_nuevo(tab, cid, it, chk, titulo, cuerpo, now_mode, when, size_mb)
             for k in ("reanudar", "reintentos", "reanudar_en", "_subida_ok", "_draft"): it.pop(k, None)
+            it["fin_t"] = time.time(); _fin_piloto(it); _minimizar(tab)
             return
         except Cancelled: raise
         except Exception as e:
             ultimo = e
+            vid = it.get("_draft"); pub = video_publico(vid) if vid else None
+            subido = bool(it.get("_subida_ok")) or (int(_PROG.get("pct") or 0) >= 90 and bool(vid) and not isinstance(e, SubidaInterrumpida))
+            if pub is True or (subido and (pub is None or not now_mode)):          # el archivo ya está en YouTube: lo que falló es solo el cierre
+                print(f"  El video ya está subido ({'público' if pub else 'sin confirmar'}); falló solo «{STEP[0]}». Lo doy por terminado y no lo repito.")
+                _dar_por_subido(it, now_mode, pub is True); _minimizar(tab); return
             print(f"  Intento {intento}/{maxi} falló en «{STEP[0]}»: {str(e)[:140]}")
-            if intento >= maxi: break
+            if intento >= maxi:
+                if subido:                                                         # último intento: el archivo ya está en YouTube, no se repite todo el proceso
+                    print("  El archivo ya está en YouTube; no pude confirmar la visibilidad. Lo cierro sin repetir."); guardar_diagnostico(tab, e); _dar_por_subido(it, now_mode, False); _minimizar(tab); return
+                break
             guardar_diagnostico(tab, e)
             it["aviso"] = f"Se cortó la subida ({str(e)[:80]}). La reanudo sola (intento {intento + 1}/{maxi})..."
             if D is not None: save(D)

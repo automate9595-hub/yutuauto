@@ -117,7 +117,7 @@ def tick(items_existentes, log=print):
     p["estado"] = f"Día {dia}/{p['dias']}: agregué «{r['title'][:50]}» ({kind}). Shorts {h['short']}/{p['shorts']} · Videos {h['video']}/{p['videos']}"
     guardar(p); log(p["estado"])
     return [{"type": "video", "id": r["id"], "key": "video:" + r["id"], "kind": kind, "url": "https://www.youtube.com/watch?v=" + r["id"],
-             "status": "pending", "n": n, "auto": True, "dmin": p.get("dmin", 0), "dmax": p.get("dmax", 0)}]
+             "status": "pending", "n": n, "auto": True, "piloto": "pa", "dmin": p.get("dmin", 0), "dmax": p.get("dmax", 0)}]
 
 
 # ======================= Piloto TikTok =======================
@@ -216,7 +216,7 @@ def tick_tt(items_existentes, log=print):
     p["usados"].append(elegido["id"]); h["n"] += 1; h["ultimo"] = time.time()
     p["hist"] = (p.get("hist", []) + [{"id": elegido["id"], "t": elegido["t"][:80], "d": hoy.isoformat()}])[-200:]
     p["estado"] = f"Día {dia}/{p['dias']}: tomé «{elegido['t'][:50]}». {h['n']}/{p['por_dia']} hoy."; guardar_tt(p); log("TikTok: " + p["estado"])
-    return [{"type": "video", "id": elegido["id"], "key": "video:" + elegido["id"], "kind": "short", "url": elegido["url"], "status": "pending", "n": 1, "auto": True, "origen": "tiktok", "dmin": p.get("dmin", 0), "dmax": p.get("dmax", 0)}]
+    return [{"type": "video", "id": elegido["id"], "key": "video:" + elegido["id"], "kind": "short", "url": elegido["url"], "status": "pending", "n": 1, "auto": True, "origen": "tiktok", "piloto": "tt", "dmin": p.get("dmin", 0), "dmax": p.get("dmax", 0)}]
 
 
 # ======================= Piloto TikTok por tema (fuentes que busca la IA) =======================
@@ -341,7 +341,7 @@ def tick_tm(items_existentes, log=print):
             p["hist"] = (p.get("hist", []) + [{"id": v["id"], "t": v["t"][:80], "f": f, "k": kind, "d": hoy.isoformat()}])[-200:]
             p["estado"] = f"Día {dia}/{p['dias']}: {kind} de {f}. Shorts {h['short']}/{p['shorts']} · Videos {h['video']}/{p['videos']}"
             guardar_tm(p); log("TikTok tema: " + p["estado"])
-            return [{"type": "video", "id": v["id"], "key": "video:" + v["id"], "kind": kind, "url": v["url"], "status": "pending", "n": 1, "auto": True, "origen": "tiktok", "dmin": p.get("dmin", 0), "dmax": p.get("dmax", 0)}]
+            return [{"type": "video", "id": v["id"], "key": "video:" + v["id"], "kind": kind, "url": v["url"], "status": "pending", "n": 1, "auto": True, "origen": "tiktok", "piloto": "tm", "dmin": p.get("dmin", 0), "dmax": p.get("dmax", 0)}]
         if not [v for v in p["cache"][f] if v["id"] not in ya] and f not in p["muertas"]: p["muertas"].append(f)
     p["estado"] = f"Revisé videos y ninguno sirvió (fuera de duración: {cont['dur']} · no eran del tema: {cont['tema']}); pruebo otras fuentes en el próximo ciclo."; guardar_tm(p); return []
 
@@ -391,4 +391,44 @@ def tick_ys(items_existentes, log=print):
     p["estado"] = f"Día {dia}/{p['dias']}: agregué «{pick['title'][:50]}» ({h['n']}/{p['por_dia']} hoy)."
     guardar_ys(p); log("Piloto YouTube Shorts: " + p["estado"])
     return [{"type": "video", "id": pick["id"], "key": "video:" + pick["id"], "kind": "short", "url": "https://www.youtube.com/watch?v=" + pick["id"],
-             "status": "pending", "n": 1, "auto": True, "origen": "yt-shorts", "dmin": p.get("dmin", 0), "dmax": p.get("dmax", 0)}]
+             "status": "pending", "n": 1, "auto": True, "origen": "yt-shorts", "piloto": "ys", "dmin": p.get("dmin", 0), "dmax": p.get("dmax", 0)}]
+
+
+# ======================= Cuenta regresiva =======================
+def gap_de(clave, p):
+    """Segundos entre un video y el siguiente (tu intervalo, o el cupo repartido en ~15 horas)."""
+    if p.get("cada"): return int(p["cada"]) * 60
+    if clave in ("pa", "tm"): return max(8 * 60, (15 * 3600) // max((p.get("shorts") or 0) + (p.get("videos") or 0), 1))
+    if clave == "ia": return max(4 * 60, (15 * 3600) // max(p.get("shorts") or 1, 1))
+    return max(8 * 60, (15 * 3600) // max(p.get("por_dia") or 1, 1))
+
+ACTIVOS = ("pending", "processing", "ready", "uploading")
+def en_curso(items, clave):
+    """¿Hay un video de este piloto todavía descargándose/editándose/subiéndose? Mientras sí, no se elige otro."""
+    return any(i.get("piloto") == clave and i.get("status") in ACTIVOS and not i.get("cancelled") for i in items or [])
+
+def proximos(piltos, items=None):
+    """[{clave, nombre, proximo(epoch), gap, cupo}] de cada piloto activo. piltos: {clave: (nombre, estado_dict)}."""
+    hoy = dt.date.today().isoformat(); out = []
+    for clave, (nombre, p) in piltos.items():
+        if not p.get("activo"): continue
+        h = p.get("hoy") or {}
+        if h.get("fecha") != hoy: h = {}
+        hecho = (h.get("short", 0) + h.get("video", 0)) if clave in ("pa", "tm") else h.get("n", 0)
+        tope = ((p.get("shorts") or 0) + (p.get("videos") or 0)) if clave in ("pa", "tm") else (p.get("shorts") if clave == "ia" else p.get("por_dia")) or 0
+        gap = gap_de(clave, p)
+        out.append({"clave": clave, "nombre": nombre, "gap": gap, "proximo": (h.get("ultimo") or 0) + gap if h.get("ultimo") else 0, "cupo": bool(tope and hecho >= tope),
+                    "hecho": hecho, "tope": tope, "enCurso": en_curso(items, clave)})
+    return out
+
+def marcar_fin(claves_tiempos):
+    """Al terminar una subida: el intervalo se cuenta desde ese momento. {clave: epoch}."""
+    guardan = {"pa": (leer, guardar), "tt": (leer_tt, guardar_tt), "tm": (leer_tm, guardar_tm), "ys": (leer_ys, guardar_ys)}
+    try:
+        import generador; guardan["ia"] = (generador.leer, generador.guardar)
+    except Exception: pass
+    for clave, t in claves_tiempos.items():
+        if clave not in guardan: continue
+        rd, gd = guardan[clave]; p = rd()
+        h = p.get("hoy") or {}
+        if p.get("activo") and h and t > (h.get("ultimo") or 0): h["ultimo"] = t; p["hoy"] = h; gd(p)

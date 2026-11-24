@@ -351,7 +351,8 @@ class H(BaseHTTPRequestHandler):
                                "tiktok": {k: v for k, v in piloto.leer_tt().items() if k not in ("usados", "rechazados", "lista")},
                                "tema_tt": {k: v for k, v in piloto.leer_tm().items() if k not in ("usados", "rechazados", "cache", "muertas", "hist")},
                                "piloto_ia": {k: v for k, v in generador.leer().items() if k not in ("ideas", "hist")},
-                               "piloto_yts": {k: v for k, v in piloto.leer_ys().items() if k not in ("usados", "hist")}})
+                               "piloto_yts": {k: v for k, v in piloto.leer_ys().items() if k not in ("usados", "hist")},
+                               "proximos": _proximos(), "ahora": time.time()})
     def do_POST(self):
         if self._bad_origin(): return self._send({"ok": False}, 403)
         n = int(self.headers.get("Content-Length") or 0); data = json.loads(self.rfile.read(n) or b"{}")
@@ -455,6 +456,13 @@ class H(BaseHTTPRequestHandler):
         self._send({"ok": False}, 404)
 
 MAX_AUTO = 8
+def _proximos():
+    try:
+        its = (read_queue() or {}).get("items", [])
+        return piloto.proximos({"pa": ("Piloto búsqueda", piloto.leer()), "tt": ("TikTok cuenta", piloto.leer_tt()), "tm": ("TikTok tema", piloto.leer_tm()),
+                                "ia": ("Creador IA", generador.leer()), "ys": ("YouTube Shorts", piloto.leer_ys())}, its)
+    except Exception: return []
+
 def _piloto_tick():
     """Si algún piloto (búsqueda o TikTok) está activo y toca el siguiente video del día: lo agrega a la cola y lanza todo el proceso."""
     pa, pt, pm, pg, py = piloto.leer(), piloto.leer_tt(), piloto.leer_tm(), generador.leer(), piloto.leer_ys()
@@ -463,9 +471,11 @@ def _piloto_tick():
     nuevos = []
     for act, fn, nom in ((pa.get("activo"), piloto.tick, "Piloto"), (pt.get("activo"), piloto.tick_tt, "Piloto TikTok"), (pm.get("activo"), piloto.tick_tm, "Piloto TikTok tema"), (py.get("activo"), piloto.tick_ys, "Piloto YouTube Shorts")):
         if act:
+            clave = {"Piloto": "pa", "Piloto TikTok": "tt", "Piloto TikTok tema": "tm", "Piloto YouTube Shorts": "ys"}[nom]
+            if piloto.en_curso(d.get("items", []) + nuevos, clave): continue      # el intervalo se cuenta desde que TERMINA la subida
             try: nuevos += fn(d.get("items", []) + nuevos, log)
             except Exception as e: log(f"{nom}: error {str(e)[:100]} (sigo con los demás)")
-    if pg.get("activo"):
+    if pg.get("activo") and not piloto.en_curso(d.get("items", []) + nuevos, "ia"):
         try: nuevos += generador.tick(d.get("items", []) + nuevos, log)
         except Exception as e: log("Piloto IA: " + str(e)[:100])
     if not nuevos: return

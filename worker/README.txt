@@ -1,4 +1,10 @@
-YUTU WORKER (v23)
+YUTU WORKER (v24)
+
+NOVEDADES v24
+- Cuenta regresiva grande en la web hasta el próximo Short de cada piloto. El intervalo (ej. 30 min) se cuenta desde que TERMINA la subida y se repite en cada ciclo.
+- Al aparecer "Se ha publicado el vídeo" toca Cerrar y MINIMIZA Chrome, para que quede a la vista la web de Yutu con la cuenta regresiva. Al subir el siguiente, Chrome se restaura solo.
+- Mientras un video del piloto se descarga/edita/sube, el piloto no elige otro.
+- Corregido el falso "Se cortó la subida / No pude abrir el selector de Visibilidad": si el archivo ya llegó a YouTube (o pasó el 90 %), se da por subido y no se repite el proceso ni se duplica; sigue con el siguiente programado.
 
 NOVEDADES v23
 - YA NO SE ABREN VENTANAS DE TU CANAL A CADA RATO: antes el worker abría una pestaña nueva de YouTube Studio cada vez que revisaba los pilotos

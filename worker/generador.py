@@ -69,7 +69,7 @@ def tick(items_existentes, log=print):
     p["estado"] = f"Día {dia}/{p['dias']}: creando un Short con IA en {IDIOMAS[idi][0]} ({h['n']}/{p['shorts']} hoy)."
     p["hist"] = (p.get("hist", []) + [{"id": vid, "i": idi, "d": hoy.isoformat()}])[-200:]
     guardar(p); log("Piloto IA: " + p["estado"])
-    return [{"type": "gen", "id": vid, "key": "gen:" + vid, "kind": "short", "status": "pending", "auto": True, "origen": "ia",
+    return [{"type": "gen", "id": vid, "key": "gen:" + vid, "kind": "short", "status": "pending", "auto": True, "origen": "ia", "piloto": "ia",
              "tema": p["tema"], "idioma": idi, "voz": p["voz"], "duracion": p["duracion"], "estilo": p.get("estilo", ""), "url": "IA: " + p["tema"], "title": "Creando con IA…"}]
 
 # ------------------------------------------------------------------ pasos de la creacion
