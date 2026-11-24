@@ -1,5 +1,5 @@
 """Servidor local: conecta la web con el worker (solo 127.0.0.1)."""
-import re, ia, piloto, generador, tiktok, json, os, pathlib, socket, subprocess, sys, threading, time, urllib.request
+import re, ia, piloto, generador, tiktok, redes, json, os, pathlib, socket, subprocess, sys, threading, time, urllib.request, facebook
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 ROOT = pathlib.Path(__file__).parent
 MEDIA = ROOT / "media"
@@ -276,7 +276,7 @@ def limpiar(o):
         try: tiktok.bg_cerrar(); time.sleep(1)
         except Exception: pass
         for nm in ("job.log", "crash.json", "cancel.json", "segmentos-usados.json", "diagnostico-subida.txt", "diagnostico-ninos.txt", "diagnostico-tiktok.txt",
-                   "diagnostico-tiktok.png", "error-subida.png", "bg-uso.txt"):
+                   "diagnostico-tiktok.png", "diagnostico-facebook.txt", "diagnostico-facebook.png", "diagnostico-redes.txt", "diagnostico-redes.png", "diagnostico-redes-botones.txt", "error-subida.png", "bg-uso.txt"):
             try: (ROOT / nm).unlink(missing_ok=True)
             except Exception: pass
         for c in ("Cache", "Code Cache", "GPUCache", "Service Worker", "DawnCache", "GrShaderCache", "ShaderCache"):
@@ -352,7 +352,8 @@ class H(BaseHTTPRequestHandler):
                                "tema_tt": {k: v for k, v in piloto.leer_tm().items() if k not in ("usados", "rechazados", "cache", "muertas", "hist")},
                                "piloto_ia": {k: v for k, v in generador.leer().items() if k not in ("ideas", "hist")},
                                "piloto_yts": {k: v for k, v in piloto.leer_ys().items() if k not in ("usados", "hist")},
-                               "proximos": _proximos(), "ahora": time.time()})
+                               "facebook": {k: v for k, v in piloto.leer_fb().items() if k not in ("usados", "rechazados", "lista", "cache", "muertas", "hist", "config")},
+                               "proximos": _proximos(), "ahora": time.time(), "destinos": redes.leer_destinos()})
     def do_POST(self):
         if self._bad_origin(): return self._send({"ok": False}, 403)
         n = int(self.headers.get("Content-Length") or 0); data = json.loads(self.rfile.read(n) or b"{}")
@@ -392,6 +393,25 @@ class H(BaseHTTPRequestHandler):
                 return self._send({"ok": True, "message": "Abrí TikTok en la ventana de Chrome del worker. Iniciá sesión ahí y después tocá «Ya inicié sesión»."})
             ok = tiktok.sesion_iniciada()
             return self._send({"ok": ok, "login": ok, "message": "Sesión de TikTok detectada y guardada ✓" if ok else "Todavía no veo la sesión de TikTok. Iniciá sesión en la ventana de Chrome y probá de nuevo."})
+        if self.path == "/destinos":                 # dónde se publican los videos (YouTube siempre; Facebook y TikTok si se eligen)
+            return self._send({"ok": True, "destinos": redes.guardar_destinos(data), "message": "Guardado."})
+        if self.path == "/facebook-login":           # sesión de Facebook en el Chrome del worker (necesaria para buscar y descargar reels)
+            if data.get("accion") == "abrir":
+                if not launch_chrome(): return self._send({"ok": False, "message": "No encontré Chrome ni Edge."})
+                if not any("facebook.com" in x.get("url", "") for x in (tabs() or []) if x.get("type") == "page"): open_tab("https://www.facebook.com/login")
+                return self._send({"ok": True, "message": "Abrí Facebook en la ventana de Chrome del worker. Iniciá sesión ahí y después tocá «Ya inicié sesión»."})
+            ok = facebook.sesion_iniciada()
+            return self._send({"ok": ok, "login": ok, "message": "Sesión de Facebook detectada y guardada ✓" if ok else "Todavía no veo la sesión de Facebook. Iniciá sesión en la ventana de Chrome y probá de nuevo."})
+        if self.path == "/piloto-facebook":          # reels de Facebook por tema o por cuenta
+            try:
+                p = piloto.configurar_fb(data)
+                falta = (p["modo"] == "cuenta" and not p["cuenta"]) or (p["modo"] != "cuenta" and not p["tema"])
+                if p["activo"] and falta: p["activo"] = False; piloto.guardar_fb(p); return self._send({"ok": False, "message": "Escribí la cuenta." if p["modo"] == "cuenta" else "Escribí el tema central."})
+                if data.get("config"): p["config"] = data["config"]; piloto.guardar_fb(p)
+            except Exception as e: return self._send({"ok": False, "message": "Datos inválidos: " + str(e)})
+            log("Piloto Facebook " + ("ACTIVADO" if p["activo"] else "pausado") + f": {('@' + p['cuenta']) if p['modo'] == 'cuenta' else '«' + p['tema'] + '»'} · {p['shorts']} Shorts + {p['videos']} Videos/día · {p['dias']} días")
+            if p["activo"]: kick()
+            return self._send({"ok": True, "message": "Piloto de Facebook activado." if p["activo"] else "Piloto de Facebook en pausa."})
         if self.path == "/piloto":                   # piloto automático: tema + cupo diario + días
             try:
                 p = piloto.configurar(data)
@@ -460,26 +480,28 @@ def _proximos():
     try:
         its = (read_queue() or {}).get("items", [])
         return piloto.proximos({"pa": ("Piloto búsqueda", piloto.leer()), "tt": ("TikTok cuenta", piloto.leer_tt()), "tm": ("TikTok tema", piloto.leer_tm()),
-                                "ia": ("Creador IA", generador.leer()), "ys": ("YouTube Shorts", piloto.leer_ys())}, its)
+                                "ia": ("Creador IA", generador.leer()), "ys": ("YouTube Shorts", piloto.leer_ys()), "fb": ("Facebook reels", piloto.leer_fb())}, its)
     except Exception: return []
 
 def _piloto_tick():
-    """Si algún piloto (búsqueda o TikTok) está activo y toca el siguiente video del día: lo agrega a la cola y lanza todo el proceso."""
-    pa, pt, pm, pg, py = piloto.leer(), piloto.leer_tt(), piloto.leer_tm(), generador.leer(), piloto.leer_ys()
-    if not (pa.get("activo") or pt.get("activo") or pm.get("activo") or pg.get("activo") or py.get("activo")): return
-    d = read_queue() or {"config": pa.get("config") or pt.get("config") or pm.get("config") or pg.get("config") or {}, "items": []}
+    """Si algún piloto está activo y toca el siguiente video: lo agrega a la cola y lanza todo el proceso.
+    Los pilotos trabajan SIEMPRE DE A UNO: mientras un video (de cualquiera) se descarga, edita o sube, no se elige otro;
+    cuando termina de subir, sigue el piloto al que le toca (el que más tiempo lleva sin publicar)."""
+    pa, pt, pm, pg, py, pf = piloto.leer(), piloto.leer_tt(), piloto.leer_tm(), generador.leer(), piloto.leer_ys(), piloto.leer_fb()
+    todos = (pa, pt, pm, pg, py, pf)
+    if not any(x.get("activo") for x in todos): return
+    d = read_queue() or {"config": next((x.get("config") for x in todos if x.get("config")), {}), "items": []}
+    if piloto.en_curso_global(d.get("items", [])): return
+    pilotos = [("pa", pa, piloto.tick, "Piloto"), ("tt", pt, piloto.tick_tt, "Piloto TikTok"), ("tm", pm, piloto.tick_tm, "Piloto TikTok tema"),
+               ("ys", py, piloto.tick_ys, "Piloto YouTube Shorts"), ("fb", pf, piloto.tick_fb, "Piloto Facebook"), ("ia", pg, generador.tick, "Piloto IA")]
+    turno = sorted([x for x in pilotos if x[1].get("activo")], key=lambda x: ((x[1].get("hoy") or {}).get("ultimo") or 0))     # el que más lleva sin publicar, primero
     nuevos = []
-    for act, fn, nom in ((pa.get("activo"), piloto.tick, "Piloto"), (pt.get("activo"), piloto.tick_tt, "Piloto TikTok"), (pm.get("activo"), piloto.tick_tm, "Piloto TikTok tema"), (py.get("activo"), piloto.tick_ys, "Piloto YouTube Shorts")):
-        if act:
-            clave = {"Piloto": "pa", "Piloto TikTok": "tt", "Piloto TikTok tema": "tm", "Piloto YouTube Shorts": "ys"}[nom]
-            if piloto.en_curso(d.get("items", []) + nuevos, clave): continue      # el intervalo se cuenta desde que TERMINA la subida
-            try: nuevos += fn(d.get("items", []) + nuevos, log)
-            except Exception as e: log(f"{nom}: error {str(e)[:100]} (sigo con los demás)")
-    if pg.get("activo") and not piloto.en_curso(d.get("items", []) + nuevos, "ia"):
-        try: nuevos += generador.tick(d.get("items", []) + nuevos, log)
-        except Exception as e: log("Piloto IA: " + str(e)[:100])
+    for clave, est, fn, nom in turno:
+        try: nuevos = fn(d.get("items", []), log)
+        except Exception as e: log(f"{nom}: error {str(e)[:100]} (sigo con los demás)"); nuevos = []
+        if nuevos: break                                   # uno solo por vez
     if not nuevos: return
-    d.setdefault("config", pa.get("config") or pt.get("config") or pm.get("config") or pg.get("config") or {}); d["config"]["publish"] = "now"
+    d.setdefault("config", pa.get("config") or pt.get("config") or pm.get("config") or pg.get("config") or pf.get("config") or {}); d["config"]["publish"] = "now"
     d["items"] = d.get("items", []) + nuevos; write_queue(d)
     try: (ROOT / "cancel.json").unlink()
     except Exception: pass

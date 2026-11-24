@@ -132,3 +132,9 @@ footer{text-align:center;color:#5f7089;padding:20px 0 90px;font-size:13px}
 .cd small{display:block;color:var(--mu);font-size:12px;letter-spacing:.08em;text-transform:uppercase}
 .cd strong{display:block;font-size:clamp(40px,9vw,64px);font-weight:800;line-height:1.1;color:var(--mint);font-variant-numeric:tabular-nums;letter-spacing:.02em}
 .cd span{display:block;color:var(--mu);font-size:13px;margin-top:4px}.cd.busy strong{color:var(--blue)}.cd.done strong{color:var(--mu)}
+
+.dest{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px 16px;margin:0 0 6px}
+.dgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:10px}
+.dchip{display:flex;flex-direction:column;gap:2px;position:relative;padding:12px 14px;border:1px solid var(--bd);border-radius:12px;background:var(--in);cursor:pointer;transition:border-color .2s,background .2s}
+.dchip input{position:absolute;opacity:0;pointer-events:none}.dchip b{font-size:14px}.dchip small{color:var(--mu);font-size:12px}
+.dchip.on{border-color:var(--mint);background:#0e2a26}.dchip.on b::after{content:" ✓";color:var(--mint)}.dchip.lock{cursor:default}

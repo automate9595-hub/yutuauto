@@ -1,4 +1,18 @@
-YUTU WORKER (v24)
+YUTU WORKER (v26)
+
+NOVEDADES v26
+- NUEVO panel «📤 Dónde se publican los videos» (paso 7 · Publicación): YouTube siempre, y si querés también tu Página de Facebook (Reel) y TikTok, con el MISMO título y descripción.
+  Funciona con los pilotos y con la cola manual. Se publica en Facebook/TikTok apenas termina la subida a YouTube (no usan la programación).
+  Se hace en el Chrome del worker (misma sesión que ya iniciaste), en una pestaña aparte que se cierra sola: Facebook por Meta Business Suite, TikTok por TikTok Studio.
+  Si Facebook/TikTok pide iniciar sesión o cambió su pantalla, el video de YouTube NO se toca ni se repite: en la tarjeta del video queda «⚠ TikTok: motivo», y en la carpeta del worker se guardan diagnostico-redes.txt / .png.
+  Cada red se publica una sola vez por video (no se duplica aunque se reintente).
+  La Página de Facebook: opcional, ID numérico; vacío = la que tengas seleccionada en Meta Business Suite.
+
+NOVEDADES v25
+- NUEVO piloto «📘 Facebook · reels»: busca reels por TEMA o por CUENTA/PÁGINA, en segundo plano (Chrome oculto, sin ventanas) y los descarga con yt-dlp. Funciona igual que los demás: cupo diario, intervalo, duración mín/máx, cuenta regresiva. Nunca repite el reel, el título ni el fragmento.
+  Facebook casi siempre exige sesión: tocá «Iniciar sesión en Facebook», entrá en la ventana de Chrome y «Ya inicié sesión: comprobar» (una sola vez).
+- Los pilotos trabajan SIEMPRE DE A UNO: mientras un video se descarga, edita o sube no se elige otro; al terminar de subir sigue el piloto que más tiempo lleva sin publicar. En la cuenta regresiva aparece «Esperando su turno».
+- Claves de Gemini nuevas agregadas a la rotación (ahora 7; pasa sola a la siguiente cuando una se queda sin cuota).
 
 NOVEDADES v24
 - Cuenta regresiva grande en la web hasta el próximo Short de cada piloto. El intervalo (ej. 30 min) se cuenta desde que TERMINA la subida y se repite en cada ciclo.

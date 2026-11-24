@@ -15,8 +15,9 @@
 <button type="button" data-p="piloto">🔎 Videos de YouTube<i id="d-piloto"></i></button>
 <button type="button" data-p="tiktok">🎵 TikTok · cuenta<i id="d-tiktok"></i></button>
 <button type="button" data-p="tema-tt">🎲 TikTok · tema<i id="d-tema-tt"></i></button>
+<button type="button" data-p="fb">📘 Facebook · reels<i id="d-fb"></i></button>
 <button type="button" data-p="pia">🤖 Creador IA<i id="d-pia"></i></button></nav>
-<p class="sub" id="ptip" style="margin:0 0 10px">Los pilotos trabajan solos: elegí uno, escribí el tema y <b>cada cuánto</b> subir. Podés dejar varios activos a la vez.</p>
+<p class="sub" id="ptip" style="margin:0 0 10px">Los pilotos trabajan solos: elegí uno, escribí el tema y <b>cada cuánto</b> subir. Podés dejar varios activos: trabajan <b>de a uno</b> (cuando uno termina de subir, sigue el otro).</p>
 <section class="card pad" id="yts" style="display:grid;gap:12px;margin:0 0 16px">
 <h3 style="margin:0">⚡ Piloto de Shorts de YouTube</h3>
 <p class="sub" style="margin:0">Elegí un tema y cada cuánto querés un Short nuevo. En cada ciclo baja UN Short distinto del tema (nunca uno ya usado, nunca el mismo tramo), lo edita, le escribe título y descripción nuevos y lo publica.</p>
@@ -63,6 +64,18 @@
 <div class="row"><button class="btn pri" id="tm-on" type="button">Activar piloto ▶</button><button class="btn ghost" id="tm-off" type="button">Pausar</button><span id="tm-msg" class="msg"></span></div>
 <small id="tm-estado" class="sub"></small></section>
 
+<section class="card pad" id="fb" style="display:grid;gap:12px;margin:0 0 16px">
+<h3 style="margin:0">📘 Piloto Facebook: reels por tema o por cuenta</h3>
+<p class="sub" style="margin:0">Busca reels en Facebook en segundo plano (sin abrir ventanas), los descarga, los edita y los sube a tu canal. Nunca repite el reel, el título ni el fragmento.</p>
+<div class="row"><select id="fb-modo" style="min-width:150px"><option value="tema">Por tema central</option><option value="cuenta">Por cuenta / página</option></select>
+<input id="fb-fuente" type="search" placeholder="Tema central · ej: Mobile Legends" style="flex:1;min-width:220px" autocomplete="off"></div>
+<div class="cfg" style="grid-template-columns:repeat(auto-fit,minmax(130px,1fr))">
+<label>Shorts por día<input id="fb-shorts" type="number" min="0" max="60"></label>
+<label>Videos por día<input id="fb-videos" type="number" min="0" max="30"></label>
+<label>Durante (días)<input id="fb-dias" type="number" min="1" max="365"></label></div>
+<div class="row"><button class="btn ghost sm" id="fb-login" type="button">🔑 Iniciar sesión en Facebook</button><button class="btn ghost sm" id="fb-chk" type="button">Ya inicié sesión: comprobar</button><small id="fb-lmsg" class="sub">Facebook casi siempre exige sesión iniciada para ver y bajar reels.</small></div>
+<div class="row"><button class="btn pri" id="fb-on" type="button">Activar piloto ▶</button><button class="btn ghost" id="fb-off" type="button">Pausar</button><span id="fb-msg" class="msg"></span></div>
+<small id="fb-estado" class="sub"></small></section>
 <section class="card pad" id="pia" style="display:grid;gap:12px;margin:0 0 16px">
 <h3 style="margin:0">🤖 Piloto creador IA: Shorts hechos 100 % por IA</h3>
 <p class="sub" style="margin:0">Elegí un tema central y cuántos Shorts querés por día. Gemini, Groq y Claude se turnan (idea → guion → título); si una falla, la siguiente sigue sin cortar el proceso. Narra con voz neuronal, genera las imágenes, subtitula y publica solo, sin repetir ideas ni títulos.</p>
@@ -185,6 +198,17 @@
 <section class="stp" data-n="7"><button class="stp-h" type="button" aria-expanded="false"><i class="num">7</i><span class="tt"><b>Publicación</b><small id="sum-7"></small></span><span class="chev">▾</span></button>
 <div class="stp-b">
 <div class="cfg"><label>Al subir a YouTube<select id="c-publish"><option value="now">Publicar de inmediato (Público)</option><option value="schedule">Programar según los horarios</option></select></label></div>
+<div class="dest" id="dest">
+<h3 style="margin:0 0 4px">📤 Dónde se publican los videos</h3>
+<p class="sub" style="margin:0 0 10px">Cada video se sube a YouTube y, si lo marcás, <b>el mismo video con el mismo título y descripción</b> también a tu Página de Facebook (como Reel) y a TikTok. Se publican al momento de subir (no usan la programación).</p>
+<div class="dgrid">
+<div class="dchip on lock"><b>▶ YouTube</b><small>Siempre activo</small></div>
+<label class="dchip" id="dd-fb"><input id="dest-fb" type="checkbox"><b>📘 Página de Facebook</b><small>Reel con título y descripción</small></label>
+<label class="dchip" id="dd-tt"><input id="dest-tt" type="checkbox"><b>🎵 TikTok</b><small>Video con título y descripción</small></label></div>
+<div class="cfg" id="dest-fbbox" style="margin-top:10px"><label class="wide">ID de la Página de Facebook (opcional; vacío = la que tengas seleccionada en Meta Business Suite)<input id="dest-fbpage" type="text" inputmode="numeric" placeholder="ej: 1234567890123" autocomplete="off"></label></div>
+<div class="row" style="margin-top:8px"><button class="btn ghost sm" id="dfb-login" type="button">🔑 Iniciar sesión en Facebook</button><button class="btn ghost sm" id="dfb-chk" type="button">Comprobar</button><small id="dfb-lmsg" class="sub"></small></div>
+<div class="row"><button class="btn ghost sm" id="dtt-login" type="button">🔑 Iniciar sesión en TikTok</button><button class="btn ghost sm" id="dtt-chk" type="button">Comprobar</button><small id="dtt-lmsg" class="sub"></small></div>
+<small id="dest-msg" class="sub"></small></div>
 <div class="cfg" style="margin-top:14px"><label>Si pegás una playlist o varios videos: publicar uno cada (minutos, 0 = todos seguidos)<input id="c-lista_cada" type="number" min="0" max="10080" placeholder="0"></label></div>
 <div class="cfg" style="margin-top:14px"><label class="chk"><input id="c-auto_reanudar" type="checkbox"> Si una subida se corta (internet, Studio, Chrome), reanudarla sola: busca el archivo en la carpeta media y toca "Reanudar subida"</label></div>
 <div id="sch-box" class="grid2"><div class="cfg">

@@ -1,7 +1,7 @@
 """Yutu worker: descarga -> recorte -> efectos -> subtitulos -> subida a YouTube Studio (sin Google Cloud)."""
 import json, math, os, re, shutil, subprocess, sys, time, pathlib, urllib.request, datetime as dt
 import threading, concurrent.futures as cf
-import efectos, ia, voz, cdp, titulos, tiktok
+import efectos, ia, voz, cdp, titulos, tiktok, redes
 ROOT = pathlib.Path(__file__).parent
 MEDIA = ROOT / "media"; MEDIA.mkdir(exist_ok=True)
 QF = ROOT / "queue.json"; CF = ROOT / "cancel.json"
@@ -1308,10 +1308,23 @@ def _conectar_studio():
     if not cid: raise RuntimeError("No detecte tu canal en YouTube Studio. Abri Studio en el Chrome del worker e inicia sesion.")
     return tab, cid
 
+def _extras(d, it):
+    """Después de YouTube: el mismo video con el mismo título y descripción en Facebook / TikTok (si los elegiste en el panel «Dónde publicar»).
+    Un fallo acá NUNCA reabre ni repite la subida de YouTube."""
+    if it.get("status") not in ("published", "scheduled"): return
+    dest = redes.leer_destinos()
+    if not (dest["fb"] or dest["tt"]): return
+    listo = it.get("stage") or "Publicado"
+    try: redes.publicar_extras(it, it.get("final_title") or it.get("title"), it.get("ia_desc") or "", lambda: check_cancel(it), print, lambda: save(d))
+    except Cancelled: print("  Publicación en redes cancelada.")
+    except Exception as e: print("  Redes: error inesperado:", str(e)[:150])
+    it["stage"] = listo; it["fin_t"] = time.time(); _fin_piloto(it); save(d)
+
 def _subir_item(d, tab, cid, it, cortadas, auto):
     try:
         check_cancel(it)
         studio_upload_one(tab, cid, it, d.get("config"), cortadas); print("Subido:", it.get("final_title") or it.get("title"), it.get("publishAt") or "publicado ahora")
+        _extras(d, it)
     except Cancelled:
         it["status"] = "cancelled"; it["stage"] = "Cancelado"; it.pop("publishAt", None)
         print("Cancelado:", it.get("title")); save(d)

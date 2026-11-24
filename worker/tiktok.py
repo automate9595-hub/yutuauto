@@ -8,6 +8,7 @@ import json, os, pathlib, re, subprocess, sys, time, urllib.parse, urllib.reques
 
 ROOT = pathlib.Path(__file__).parent
 COOK = ROOT / "tiktok-cookies.txt"
+FBCOOK = ROOT / "facebook-cookies.txt"
 BG_PORT = 9333
 BG_DIR = ROOT / "chrome-bg"
 BG_USO = ROOT / "bg-uso.txt"
@@ -59,9 +60,15 @@ def leer_cookies_archivo():
 def sesion_guardada(): return sesion_en(leer_cookies_archivo())
 
 
-def cookies_validas():
+def _sitio(url):
+    u = str(url)
+    return "tiktok" if "tiktok.com" in u else ("facebook" if ("facebook.com" in u or "fb.watch" in u or "fb.com" in u) else "")
+
+
+def cookies_validas(archivo=None):
     """Revisa el archivo de cookies; las líneas rotas se quitan (una sola línea mala hace fallar a yt-dlp entero)."""
-    try: txt = COOK.read_text("utf-8", "replace")
+    archivo = archivo or COOK
+    try: txt = archivo.read_text("utf-8", "replace")
     except Exception: return False
     buenas, cambio, n = ["# Netscape HTTP Cookie File"], False, 0
     for l in txt.splitlines():
@@ -70,7 +77,7 @@ def cookies_validas():
         if len(f) == 7 and f[0].strip() and f[5].strip() and re.fullmatch(r"-?\d+", f[4].strip() or "x"): buenas.append(l); n += 1
         else: cambio = True
     if cambio and n:
-        try: COOK.write_text("\n".join(buenas) + "\n", "utf-8")
+        try: archivo.write_text("\n".join(buenas) + "\n", "utf-8")
         except Exception: pass
     return n > 0
 
@@ -87,9 +94,10 @@ def _curl_ok():
 
 def variantes(url):
     """Formas de llamar a yt-dlp, de la más completa a la más simple (la que funcionó la última vez va primero)."""
-    tt = "tiktok.com" in str(url)
+    tt = _sitio(url)
     imp = ["--impersonate", "chrome"] if _curl_ok() else []
-    ck = ["--cookies", str(COOK)] if tt and cookies_validas() else []
+    arch = {"tiktok": COOK, "facebook": FBCOOK}.get(tt)
+    ck = ["--cookies", str(arch)] if arch and cookies_validas(arch) else []
     out = []
     for a in (imp + ck, imp, ck, []):
         if a not in out: out.append(a)
@@ -99,7 +107,7 @@ def variantes(url):
 
 
 def recordar(url, var):
-    _MEJOR["tiktok.com" in str(url)] = var; _FALLO["t"] = 0
+    _MEJOR[_sitio(url)] = var; _FALLO["t"] = 0
 
 
 def limpiar_error(texto):

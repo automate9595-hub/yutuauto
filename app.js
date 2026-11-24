@@ -120,6 +120,7 @@ function cdDraw(){const w=$("cdwrap");if(!w)return;const now=Date.now()/1000-CD.
 w.innerHTML=CD.list.map(p=>{let big,sub,cl="cd";
 if(p.cupo){big="✔";sub="Cupo de hoy completo ("+p.hecho+"/"+p.tope+")";cl+=" done"}
 else if(p.enCurso){big="⏳";sub="Procesando y subiendo… el intervalo empieza al terminar";cl+=" busy"}
+else if(p.turno&&(!p.proximo||p.proximo<=now)){big="⏸";sub="Esperando su turno: otro piloto está subiendo";cl+=" busy"}
 else if(!p.proximo){big="00:00";sub="Buscando el próximo video…"}
 else{const f=p.proximo-now;if(f<=0){big="00:00";sub="Buscando el próximo video…"}else{big=cdFmt(f);sub="Próximo Short · cada "+fmtDur(p.gap)+" · "+p.hecho+"/"+p.tope+" hoy"}}
 return `<div class="${cl}"><small>${p.nombre}</small><strong>${big}</strong><span>${sub}</span></div>`}).join("")}
@@ -146,6 +147,8 @@ const ST={pending:"En espera",processing:"En proceso",ready:"Editado, listo para
 const BUSY=["pending","processing","uploading"];
 function quitarCancelados(items){const c=new Set(items.filter(x=>x.status==="cancelled").map(x=>String(x.key||"").split("#")[0]));
 if(!c.size)return;const n=q.length;q=q.filter(x=>!c.has(x.key));if(q.length!==n)save()}
+function extrasTxt(x){const e=x.extras;if(!e)return"";const n={fb:"Facebook",tt:"TikTok"};
+return Object.keys(e).map(k=>`<small class="${e[k].ok?"pgt":"err"}">${e[k].ok?"✓":"⚠"} ${n[k]||k}: ${esc(e[k].msg||"")}</small>`).join("")}
 function pubRender(items){W.items=items;quitarCancelados(items);const el=$("pub");$("s-pub").textContent=items.filter(x=>x.status==="published"||x.status==="scheduled").length;
 const nb=items.filter(x=>BUSY.includes(x.status)).length,nd=items.filter(x=>x.status==="published").length;
 $("sum-9").textContent=items.length?`${items.length} videos · ${nd} publicados${nb?" · "+nb+" en curso":""}`:"Estado de cada video";
@@ -158,8 +161,8 @@ st==="ready"?`<button class="btn pri sm" data-act="now" data-k="${k}">Subir ahor
 BUSY.includes(st)?`<button class="btn ghost sm danger" data-act="cancel" data-k="${k}">Cancelar</button>`:"",
 x.error?`<button class="btn ghost sm" data-act="diag" data-k="${k}">Ver diagnóstico</button>`:""].join("");
 const link=x.yt_url?`<a class="yl" href="${esc(x.yt_url)}" target="_blank" rel="noopener">Ver en YouTube ↗</a>`:"";
-return `<div class="pc">${x.type==="video"&&(x.thumb||x.origen!=="tiktok")?`<img loading="lazy" src="${esc(x.thumb||"https://i.ytimg.com/vi/"+(x.id||"")+"/mqdefault.jpg")}" alt="" referrerpolicy="no-referrer" onerror="this.style.visibility='hidden'">`:""}<div><b>${esc(x.ia_title||x.title||x.url||"")}</b><span class="st ${esc(st)}">${ST[st]||esc(st)}</span><small>${x.kind==="short"?"Short":"Video"}${x.parts>1?" · Parte "+x.part+"/"+x.parts:""}${x.reanudar&&x.status==="ready"?" · se reanuda sola":""}${x.publishAt?" · "+new Date(x.publishAt).toLocaleString("es",{dateStyle:"medium",timeStyle:"short"}):""}</small>
-<div style="height:10px;border-radius:99px;background:#1a2538;overflow:hidden;margin:10px 0 4px"><span style="display:block;height:100%;width:${pct}%;min-width:${pct?4:0}px;border-radius:99px;background:${["error","cancelled"].includes(st)?"#8a5a66":BUSY.includes(st)?"#5b86ff":"#45c79b"}"></span></div><small class="pgt">${label}</small>${x.ia?`<small class="pgt">Ayuda IA: ${esc(x.ia)}</small>`:""}${link}${x.aviso?`<small class="err">⚠ ${esc(x.aviso)}</small>`:""}${x.error?`<small class="err">${esc(x.error)}</small>`:""}${acts?`<div class="acts">${acts}</div>`:""}</div></div>`}).join("")}
+return `<div class="pc">${x.type==="video"&&(x.thumb||(x.origen!=="tiktok"&&x.origen!=="facebook"))?`<img loading="lazy" src="${esc(x.thumb||"https://i.ytimg.com/vi/"+(x.id||"")+"/mqdefault.jpg")}" alt="" referrerpolicy="no-referrer" onerror="this.style.visibility='hidden'">`:""}<div><b>${esc(x.ia_title||x.title||x.url||"")}</b><span class="st ${esc(st)}">${ST[st]||esc(st)}</span><small>${x.kind==="short"?"Short":"Video"}${x.parts>1?" · Parte "+x.part+"/"+x.parts:""}${x.reanudar&&x.status==="ready"?" · se reanuda sola":""}${x.publishAt?" · "+new Date(x.publishAt).toLocaleString("es",{dateStyle:"medium",timeStyle:"short"}):""}</small>
+<div style="height:10px;border-radius:99px;background:#1a2538;overflow:hidden;margin:10px 0 4px"><span style="display:block;height:100%;width:${pct}%;min-width:${pct?4:0}px;border-radius:99px;background:${["error","cancelled"].includes(st)?"#8a5a66":BUSY.includes(st)?"#5b86ff":"#45c79b"}"></span></div><small class="pgt">${label}</small>${x.ia?`<small class="pgt">Ayuda IA: ${esc(x.ia)}</small>`:""}${link}${extrasTxt(x)}${x.aviso?`<small class="err">⚠ ${esc(x.aviso)}</small>`:""}${x.error?`<small class="err">${esc(x.error)}</small>`:""}${acts?`<div class="acts">${acts}</div>`:""}</div></div>`}).join("")}
 $("pub").onclick=async e=>{const b=e.target.closest("[data-act]");if(!b)return;const k=b.dataset.k,a=b.dataset.act;
 if(a==="prev"){const it=W.items.find(y=>y.key===k)||{},id=it.fid||k.split(":")[1].split("#")[0];openWin("Vista previa del video editado",`<video controls autoplay playsinline style="width:100%;max-height:70vh;border-radius:10px;background:#000" src="${API}/media/${encodeURIComponent(id)}_final.mp4"></video><p class="sub">Es el archivo ya editado, tal como se va a subir.</p>`);return}
 if(a==="diag"){verDiag();return}
@@ -221,6 +224,33 @@ $("tm-estado").textContent=(p.activo?"🟢 Activo · ":"⏸ En pausa · ")+(p.es
 setInterval(tmPoll,8000);tmPoll();
 
 
+/* ---------- dónde se publican los videos ---------- */
+const DST={fb:false,tt:false,fb_page:""};let dstOk=false;
+function dstDraw(){$("dest-fb").checked=DST.fb;$("dest-tt").checked=DST.tt;$("dd-fb").classList.toggle("on",DST.fb);$("dd-tt").classList.toggle("on",DST.tt);
+$("dest-fbbox").style.display=DST.fb?"":"none";if(document.activeElement!==$("dest-fbpage"))$("dest-fbpage").value=DST.fb_page||"";
+$("dfb-login").parentElement.style.display=DST.fb?"":"none";$("dtt-login").parentElement.style.display=DST.tt?"":"none";
+const s=["YouTube"];if(DST.fb)s.push("Facebook");if(DST.tt)s.push("TikTok");const sm=$("sum-7");if(sm&&sm.dataset.d!==s.join()){sm.dataset.d=s.join()}}
+async function dstSave(){const m=$("dest-msg");const r=await call("/destinos",DST,8000);m.className="sub"+(r&&r.ok?"":" err");m.textContent=r?(r.ok?"Guardado: se publicará en "+["YouTube"].concat(DST.fb?["Facebook"]:[],DST.tt?["TikTok"]:[]).join(" + ")+".":r.message):"No encuentro el worker. Ejecutá 2-INSTALAR-Y-EJECUTAR.bat."}
+$("dest-fb").onchange=e=>{DST.fb=e.target.checked;dstDraw();dstSave()};$("dest-tt").onchange=e=>{DST.tt=e.target.checked;dstDraw();dstSave()};
+let dstT=null;$("dest-fbpage").oninput=e=>{DST.fb_page=e.target.value.trim();clearTimeout(dstT);dstT=setTimeout(dstSave,700)};
+async function dstLoad(){if(dstOk)return;const s=await call("/status");if(s&&s.destinos){Object.assign(DST,s.destinos);dstOk=true;dstDraw()}}
+dstDraw();dstLoad();setInterval(dstLoad,5000);
+
+/* ---------- piloto Facebook (reels) ---------- */
+const FB_K="yutu-piloto-fb",fbo=Object.assign({modo:"tema",tema:"",cuenta:"",shorts:10,videos:0,dias:30},load(FB_K,{}));
+const fbSave=()=>{try{localStorage.setItem(FB_K,JSON.stringify(fbo))}catch{}};
+const fbFuente=()=>{const c=fbo.modo==="cuenta";$("fb-fuente").value=c?fbo.cuenta:fbo.tema;$("fb-fuente").placeholder=c?"Cuenta o página · ej: nombrepagina o facebook.com/nombrepagina":"Tema central · ej: Mobile Legends"};
+$("fb-modo").value=fbo.modo;fbFuente();
+$("fb-modo").onchange=()=>{fbo.modo=$("fb-modo").value;fbSave();fbFuente()};
+$("fb-fuente").oninput=e=>{fbo[fbo.modo==="cuenta"?"cuenta":"tema"]=e.target.value;fbSave()};
+for(const k of["shorts","videos","dias"]){const el=$("fb-"+k);el.value=fbo[k];el.oninput=()=>{fbo[k]=Math.max(0,+el.value||0);fbSave()}}
+const fbSend=async activo=>{const m=$("fb-msg"),c=fbo.modo==="cuenta";if(activo&&!(c?fbo.cuenta:fbo.tema).trim()){m.textContent=c?"Escribí la cuenta o página.":"Escribí el tema central.";m.className="msg err";return}
+const r=await call("/piloto-facebook",{...fbo,activo,config:cfg},8000);m.className="msg"+(r&&r.ok?"":" err");m.textContent=r?r.message:"No encuentro el worker. Ejecutá 2-INSTALAR-Y-EJECUTAR.bat.";fbPoll()};
+$("fb-on").onclick=()=>fbSend(true);$("fb-off").onclick=()=>fbSend(false);
+async function fbPoll(){if(document.hidden)return;const s=await call("/status");if(!s||!s.facebook||!(s.facebook.tema||s.facebook.cuenta))return;const p=s.facebook;
+$("fb-estado").textContent=(p.activo?"🟢 Activo · ":"⏸ En pausa · ")+(p.estado||"Esperando el primer ciclo (hasta 1 min).")}
+setInterval(fbPoll,8000);fbPoll();
+
 /* ---------- piloto creador IA ---------- */
 const PI_K="yutu-piloto-ia",IDI={"es-MX":"Español latino (México)","es-AR":"Español latino (Argentina)","es-CO":"Español latino (Colombia)","es-US":"Español latino (EE. UU.)","es-ES":"Español (España)","en-US":"Inglés","pt-BR":"Portugués (Brasil)","fr-FR":"Francés","de-DE":"Alemán","it-IT":"Italiano"};
 const pi=Object.assign({tema:"",shorts:5,dias:30,duracion:45,voz:"alternar",estilo:"",idiomas:["es-MX"]},load(PI_K,{}));if(!Array.isArray(pi.idiomas)||!pi.idiomas.length)pi.idiomas=["es-MX"];
@@ -255,15 +285,15 @@ const upd=()=>{const v=Math.max(0,+n.value||0);obj.cada=Math.round(v*(u.value===
 cadaCtl("yts",ys,ysSave);cadaCtl("piloto",pl,()=>{try{localStorage.setItem(PL_K,JSON.stringify(pl))}catch{}});
 cadaCtl("tiktok",tt,()=>{try{localStorage.setItem(TT_K,JSON.stringify(tt))}catch{}});
 cadaCtl("tema-tt",tm,()=>{try{localStorage.setItem(TM_K,JSON.stringify(tm))}catch{}});
-cadaCtl("pia",pi,piSave);
+cadaCtl("pia",pi,piSave);cadaCtl("fb",fbo,fbSave);
 
 /* ---------- pestañas ---------- */
-const PT=["yts","piloto","tiktok","tema-tt","pia"];let ptSel=load("yutu-ptab","yts");
+const PT=["yts","piloto","tiktok","tema-tt","fb","pia"];let ptSel=load("yutu-ptab","yts");
 function showTab(p){ptSel=PT.includes(p)?p:"yts";try{localStorage.setItem("yutu-ptab",JSON.stringify(ptSel))}catch{}
 PT.forEach(k=>{$(k).classList.toggle("phid",k!==ptSel)});document.querySelectorAll("#ptabs button").forEach(b=>b.classList.toggle("on",b.dataset.p===ptSel))}
 document.querySelectorAll("#ptabs button").forEach(b=>b.onclick=()=>showTab(b.dataset.p));showTab(ptSel);
 async function tabsPoll(){const s=await call("/status");if(!s)return;
-const on={yts:s.piloto_yts,piloto:s.piloto,tiktok:s.tiktok,"tema-tt":s.tema_tt,pia:s.piloto_ia};
+const on={yts:s.piloto_yts,piloto:s.piloto,tiktok:s.tiktok,"tema-tt":s.tema_tt,fb:s.facebook,pia:s.piloto_ia};
 PT.forEach(k=>{const d=$("d-"+k);if(d)d.classList.toggle("act",!!(on[k]&&on[k].activo))});
 const e=s.piloto_yts;if(e&&e.tema)$("ys-estado").textContent=(e.activo?"🟢 Activo · ":"⏸ En pausa · ")+(e.estado||"Buscando el primer Short…")}
 setInterval(()=>{if(!document.hidden)tabsPoll()},8000);tabsPoll();
@@ -300,13 +330,13 @@ ins.forEach(el=>el.oninput=()=>{obj[el.dataset.r]=secRead(el.value,u);saveFn();s
 const paintSum=()=>{const lo=+obj.dmin||0,hi=+obj.dmax||0;sum.textContent=lo&&hi?`Buscará videos de ${fm(lo)} a ${fm(hi)}.`:lo?`Buscará videos de al menos ${fm(lo)} (sin máximo).`:hi?`Buscará videos de hasta ${fm(hi)} (sin mínimo).`:"Sin límite de duración."};
 box.querySelectorAll(".seg button").forEach(b=>b.onclick=()=>{u=b.dataset.u;obj.dunit=u;saveFn();paint()})}
 rangoCtl("yts",ys,ysSave);rangoCtl("piloto",pl,()=>{try{localStorage.setItem(PL_K,JSON.stringify(pl))}catch{}});
-rangoCtl("tiktok",tt,()=>{try{localStorage.setItem(TT_K,JSON.stringify(tt))}catch{}});rangoCtl("tema-tt",tm,()=>{try{localStorage.setItem(TM_K,JSON.stringify(tm))}catch{}});
+rangoCtl("tiktok",tt,()=>{try{localStorage.setItem(TT_K,JSON.stringify(tt))}catch{}});rangoCtl("tema-tt",tm,()=>{try{localStorage.setItem(TM_K,JSON.stringify(tm))}catch{}});rangoCtl("fb",fbo,fbSave);
 
 /* ---------- sesión de TikTok (en el Chrome del worker) ---------- */
-function ttLogin(pre){const m=$(pre+"-lmsg");if(!m)return;
-$(pre+"-login").onclick=async()=>{m.textContent="Abriendo TikTok…";const r=await call("/tiktok-login",{accion:"abrir"},15000);m.textContent=r?r.message:"No encuentro el worker. Ejecutá 2-INSTALAR-Y-EJECUTAR.bat."};
-$(pre+"-chk").onclick=async()=>{m.textContent="Comprobando…";const r=await call("/tiktok-login",{accion:"comprobar"},40000);m.textContent=r?r.message:"No encuentro el worker. Ejecutá 2-INSTALAR-Y-EJECUTAR.bat."}}
-ttLogin("tt");ttLogin("tm");
+function ttLogin(pre,ep="/tiktok-login",red="TikTok"){const m=$(pre+"-lmsg");if(!m)return;
+$(pre+"-login").onclick=async()=>{m.textContent="Abriendo "+red+"…";const r=await call(ep,{accion:"abrir"},15000);m.textContent=r?r.message:"No encuentro el worker. Ejecutá 2-INSTALAR-Y-EJECUTAR.bat."};
+$(pre+"-chk").onclick=async()=>{m.textContent="Comprobando…";const r=await call(ep,{accion:"comprobar"},40000);m.textContent=r?r.message:"No encuentro el worker. Ejecutá 2-INSTALAR-Y-EJECUTAR.bat."}}
+ttLogin("tt");ttLogin("tm");ttLogin("fb","/facebook-login","Facebook");ttLogin("dfb","/facebook-login","Facebook");ttLogin("dtt","/tiktok-login","TikTok");
 
 
 /* ---------- vaciar rastros ---------- */

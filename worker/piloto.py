@@ -1,6 +1,6 @@
 """Piloto automático: tema central -> busca videos relevantes (sin repetir) -> los pone en la cola -> descarga, edita y sube solo."""
 import json, pathlib, subprocess, sys, time, urllib.parse, datetime as dt
-import ia, tiktok
+import ia, tiktok, facebook
 ROOT = pathlib.Path(__file__).parent
 def _imp():
     try: import curl_cffi; return ["--impersonate", "chrome"]
@@ -33,11 +33,13 @@ def _duracion(url):
     """Duración en segundos sin gastar de más (yt-dlp rápido y, si no, la página en el Chrome oculto). 0 = no se pudo saber."""
     return tiktok.duracion(url)
 
+FF = ROOT / "piloto-facebook.json"
+
 def limpiar_memoria():
     """Borra lo ya usado/rechazado, el historial y las fuentes de TODOS los pilotos. Conserva su configuración y el cupo de hoy."""
     n = 0
     for f, claves in ((PF, ("usados", "hist")), (TF, ("usados", "rechazados", "hist", "lista")), (PTF, ("usados", "rechazados", "hist", "fuentes", "muertas", "cache")),
-                      (YF, ("usados", "hist")), (ROOT / "piloto-ia.json", ("ideas", "hist"))):
+                      (YF, ("usados", "hist")), (FF, ("usados", "rechazados", "hist", "fuentes", "muertas", "cache", "lista")), (ROOT / "piloto-ia.json", ("ideas", "hist"))):
         try: d = json.loads(f.read_text("utf-8"))
         except Exception: continue
         for k in claves:
@@ -398,7 +400,7 @@ def tick_ys(items_existentes, log=print):
 def gap_de(clave, p):
     """Segundos entre un video y el siguiente (tu intervalo, o el cupo repartido en ~15 horas)."""
     if p.get("cada"): return int(p["cada"]) * 60
-    if clave in ("pa", "tm"): return max(8 * 60, (15 * 3600) // max((p.get("shorts") or 0) + (p.get("videos") or 0), 1))
+    if clave in ("pa", "tm", "fb"): return max(8 * 60, (15 * 3600) // max((p.get("shorts") or 0) + (p.get("videos") or 0), 1))
     if clave == "ia": return max(4 * 60, (15 * 3600) // max(p.get("shorts") or 1, 1))
     return max(8 * 60, (15 * 3600) // max(p.get("por_dia") or 1, 1))
 
@@ -407,6 +409,10 @@ def en_curso(items, clave):
     """¿Hay un video de este piloto todavía descargándose/editándose/subiéndose? Mientras sí, no se elige otro."""
     return any(i.get("piloto") == clave and i.get("status") in ACTIVOS and not i.get("cancelled") for i in items or [])
 
+def en_curso_global(items):
+    """¿Hay ALGÚN video automático (de cualquier piloto) descargándose, editándose o subiéndose? Los pilotos trabajan de a uno."""
+    return [i for i in items or [] if (i.get("piloto") or i.get("auto")) and i.get("status") in ACTIVOS and not i.get("cancelled")]
+
 def proximos(piltos, items=None):
     """[{clave, nombre, proximo(epoch), gap, cupo}] de cada piloto activo. piltos: {clave: (nombre, estado_dict)}."""
     hoy = dt.date.today().isoformat(); out = []
@@ -414,16 +420,17 @@ def proximos(piltos, items=None):
         if not p.get("activo"): continue
         h = p.get("hoy") or {}
         if h.get("fecha") != hoy: h = {}
-        hecho = (h.get("short", 0) + h.get("video", 0)) if clave in ("pa", "tm") else h.get("n", 0)
-        tope = ((p.get("shorts") or 0) + (p.get("videos") or 0)) if clave in ("pa", "tm") else (p.get("shorts") if clave == "ia" else p.get("por_dia")) or 0
+        hecho = (h.get("short", 0) + h.get("video", 0)) if clave in ("pa", "tm", "fb") else h.get("n", 0)
+        tope = ((p.get("shorts") or 0) + (p.get("videos") or 0)) if clave in ("pa", "tm", "fb") else (p.get("shorts") if clave == "ia" else p.get("por_dia")) or 0
         gap = gap_de(clave, p)
         out.append({"clave": clave, "nombre": nombre, "gap": gap, "proximo": (h.get("ultimo") or 0) + gap if h.get("ultimo") else 0, "cupo": bool(tope and hecho >= tope),
-                    "hecho": hecho, "tope": tope, "enCurso": en_curso(items, clave)})
+                    "hecho": hecho, "tope": tope, "enCurso": en_curso(items, clave),
+                    "turno": bool(en_curso_global(items)) and not en_curso(items, clave)})
     return out
 
 def marcar_fin(claves_tiempos):
     """Al terminar una subida: el intervalo se cuenta desde ese momento. {clave: epoch}."""
-    guardan = {"pa": (leer, guardar), "tt": (leer_tt, guardar_tt), "tm": (leer_tm, guardar_tm), "ys": (leer_ys, guardar_ys)}
+    guardan = {"pa": (leer, guardar), "tt": (leer_tt, guardar_tt), "tm": (leer_tm, guardar_tm), "ys": (leer_ys, guardar_ys), "fb": (leer_fb, guardar_fb)}
     try:
         import generador; guardan["ia"] = (generador.leer, generador.guardar)
     except Exception: pass
@@ -432,3 +439,121 @@ def marcar_fin(claves_tiempos):
         rd, gd = guardan[clave]; p = rd()
         h = p.get("hoy") or {}
         if p.get("activo") and h and t > (h.get("ultimo") or 0): h["ultimo"] = t; p["hoy"] = h; gd(p)
+
+
+# ======================= Piloto Facebook (reels por tema o por cuenta) =======================
+def leer_fb():
+    try: return json.loads(FF.read_text("utf-8"))
+    except Exception: return {}
+
+def guardar_fb(p):
+    tmp = FF.with_suffix(".tmp"); tmp.write_text(json.dumps(p, indent=2, ensure_ascii=False), "utf-8"); tmp.replace(FF)
+
+def configurar_fb(d):
+    p = leer_fb(); modo = d.get("modo") if d.get("modo") in ("tema", "cuenta") else p.get("modo", "tema")
+    tema = str(d.get("tema", p.get("tema", ""))).strip()[:120]; cuenta = str(d.get("cuenta", p.get("cuenta", ""))).strip()[:200]
+    if cuenta: cuenta = facebook.nombre_cuenta(cuenta) or cuenta
+    if (modo, tema, cuenta) != (p.get("modo"), p.get("tema"), p.get("cuenta")): p.update(fuentes=[], muertas=[], cache={}, rechazados=[], lista=[], lista_t=0, inicio=None, hoy={})
+    p.update(activo=bool(d.get("activo")), modo=modo, tema=tema, cuenta=cuenta, shorts=max(0, min(int(d.get("shorts", 10)), 60)),
+             videos=max(0, min(int(d.get("videos", 0)), 30)), dias=max(1, min(int(d.get("dias", 30)), 365)), cada=max(0, min(int(d.get("cada", 0) or 0), 1440)),
+             verificar=bool(d.get("verificar", True)), **_rango(d))
+    if p["activo"] and not p.get("inicio"): p["inicio"] = dt.date.today().isoformat()
+    if p["activo"]: p["lista_t"] = 0
+    for k in ("usados", "rechazados", "hist", "fuentes", "muertas", "lista"): p.setdefault(k, [])
+    p.setdefault("cache", {}); guardar_fb(p); return p
+
+MSG_FB = {"login": "Facebook pide iniciar sesión: tocá «Iniciar sesión en Facebook», entrá a tu cuenta en la ventana de Chrome y reintento solo.",
+          "captcha": "Facebook pidió una verificación de seguridad: resolvela en la ventana de Chrome del worker y reintento solo.",
+          "noexiste": "Facebook no encuentra esa página o cuenta: revisá cómo está escrita (o que sea pública).",
+          "sin_chrome": "No pude abrir el Chrome del worker. Tocá «Conectar con mi canal» en el paso 1 y reintento solo."}
+
+def _norm_t(t): return re.sub(r"[^\w]+", " ", (t or "").lower()).strip()
+
+def _fuentes_fb(p, modo="alternar"):
+    """Búsquedas del tema en Facebook (directas, y variantes que propone la IA)."""
+    t = p["tema"].strip()
+    nuevas = [s for s in ("?" + t + " reels", "?" + t, "#" + re.sub(r"[^\w]+", "", t.lower()), "?" + t + " viral") if len(s) > 2 and s not in p["fuentes"] and s not in p["muertas"]]
+    try:
+        txt = ia.texto(f"Tema central: «{t}». Proponé 8 búsquedas DISTINTAS para encontrar reels de Facebook de ese tema (frases cortas, español e inglés, variando subtemas). "
+                       f"No repitas: {', '.join(p['fuentes'][-30:]) or 'ninguna'}. Respondé una por línea, sin numerar.", modo) or ""
+        for l in txt.splitlines():
+            l = re.sub(r"^[\s\-*\d.)]+", "", l).strip(" \"«»")
+            if 3 <= len(l) <= 60 and ("?" + l) not in p["fuentes"] and ("?" + l) not in p["muertas"] and ("?" + l) not in nuevas: nuevas.append("?" + l)
+    except Exception: pass
+    p["fuentes"] += nuevas; return nuevas
+
+def _titulos_usados(p, items):
+    return {_norm_t(h.get("t")) for h in p.get("hist", []) if len(_norm_t(h.get("t"))) > 12} | {_norm_t(i.get("title")) for i in items or [] if len(_norm_t(i.get("title"))) > 12}
+
+def tick_fb(items_existentes, log=print):
+    p = leer_fb()
+    if not p.get("activo") or not (p.get("tema") if p.get("modo") != "cuenta" else p.get("cuenta")): return []
+    hoy = dt.date.today(); ini = dt.date.fromisoformat(p.get("inicio") or hoy.isoformat()); dia = (hoy - ini).days + 1
+    if dia > p["dias"]:
+        p["activo"] = False; p["estado"] = f"Terminado: se completaron los {p['dias']} días."; guardar_fb(p); log("Facebook: " + p["estado"]); return []
+    h = p.get("hoy") or {}
+    if h.get("fecha") != hoy.isoformat(): h = {"fecha": hoy.isoformat(), "short": 0, "video": 0, "ultimo": 0}
+    p["hoy"] = h; fs, fv = p["shorts"] - h["short"], p["videos"] - h["video"]
+    if fs <= 0 and fv <= 0: p["estado"] = f"Día {dia}/{p['dias']}: cupo de hoy completo."; guardar_fb(p); return []
+    gap = gap_de("fb", p)
+    if time.time() - h["ultimo"] < gap: p["estado"] = f"Día {dia}/{p['dias']}: Shorts {h['short']}/{p['shorts']} · Videos {h['video']}/{p['videos']}"; guardar_fb(p); return []
+    kind = "video" if (fv > 0 and (fs <= 0 or fv / max(p["videos"], 1) >= fs / max(p["shorts"], 1))) else "short"
+    ya = {i.get("id") for i in items_existentes} | set(p["usados"]) | set(p["rechazados"])
+    tit = _titulos_usados(p, items_existentes)
+    cuenta = p.get("modo") == "cuenta"
+    def libres(lst): return [v for v in lst if ("fb" + v["id"]) not in ya]
+    def elegir_de(lst, origen):
+        cand = libres(lst); random.shuffle(cand); contd = {"dur": 0, "tema": 0, "rep": 0}
+        for v in cand[:10]:
+            vid = "fb" + v["id"]
+            if v["t"] and len(_norm_t(v["t"])) > 12 and _norm_t(v["t"]) in tit: p["rechazados"].append(vid); ya.add(vid); contd["rep"] += 1; continue       # mismo título: no se repite
+            if not en_rango(p, v): p["rechazados"].append(vid); ya.add(vid); contd["dur"] += 1; continue
+            if not cuenta and p.get("verificar", True) and v["t"] and not es_del_tema(v["t"], p["tema"]): p["rechazados"].append(vid); ya.add(vid); contd["tema"] += 1; continue
+            return v, contd
+        return None, contd
+    def tomar(v, origen):
+        vid = "fb" + v["id"]; p["usados"].append(vid); h[kind] += 1; h["ultimo"] = time.time()
+        p["hist"] = (p.get("hist", []) + [{"id": vid, "t": v["t"][:80], "f": origen, "k": kind, "d": hoy.isoformat()}])[-300:]
+        p["estado"] = f"Día {dia}/{p['dias']}: {kind} de {origen}. Shorts {h['short']}/{p['shorts']} · Videos {h['video']}/{p['videos']}"
+        guardar_fb(p); log("Facebook: " + p["estado"])
+        return [{"type": "video", "id": vid, "key": "video:" + vid, "kind": kind, "url": v["url"], "status": "pending", "n": 1, "auto": True, "origen": "facebook", "piloto": "fb",
+                 "dmin": p.get("dmin", 0), "dmax": p.get("dmax", 0), "title": v["t"][:120]}]
+    if cuenta:                                           # ---- por cuenta: lista de reels de esa página
+        if not p.get("lista") and time.time() - p.get("lista_t", 0) < 600: return []
+        if not p.get("lista") or time.time() - p.get("lista_t", 0) > 6 * 3600 or not libres(p["lista"]):
+            if time.time() - p.get("lista_t", 0) > 600 or not p.get("lista"):
+                p["estado"] = f"Leyendo los reels de {p['cuenta']} (segundo plano)…"; guardar_fb(p)
+                try: nueva = facebook.listar(facebook.url_cuenta(p["cuenta"]), log, scrolls=14)
+                except Exception as e: nueva = []; log("Facebook: error leyendo la cuenta: " + str(e)[:80])
+                p["lista_t"] = time.time()
+                if nueva: p["lista"] = nueva
+                elif not p.get("lista"):
+                    p["estado"] = MSG_FB.get(facebook.MOTIVO.get("m"), "La cuenta no devolvió reels (¿mal escrita, sin reels o Facebook la bloqueó?). Probá «Iniciar sesión en Facebook» y reintento en 10 min.")
+                    guardar_fb(p); log("Facebook: " + p["estado"]); return []
+        v, contd = elegir_de(p["lista"], p["cuenta"])
+        if v: return tomar(v, "@" + p["cuenta"])
+        p["estado"] = "Ya se usaron (o no sirvieron) los reels leídos; releo la cuenta en el próximo ciclo." if not libres(p["lista"]) else f"Revisé reels y ninguno sirvió (fuera de duración: {contd['dur']} · repetidos: {contd['rep']}); pruebo otros en el próximo ciclo."
+        if not libres(p["lista"]): p["lista_t"] = min(p.get("lista_t", 0), time.time() - 6 * 3600 - 1)
+        guardar_fb(p); return []
+    abiertas = 0                                        # ---- por tema: búsquedas / hashtags
+    for _ in range(8):
+        vs = [f for f in p["fuentes"] if f not in p["muertas"] and (f not in p["cache"] or libres(p["cache"][f]))]
+        if not vs:
+            nuevas = _fuentes_fb(p)
+            if not nuevas: p["estado"] = "No encuentro fuentes nuevas para ese tema."; guardar_fb(p); log("Facebook: " + p["estado"]); return []
+            log("Facebook: fuentes nuevas: " + ", ".join(nuevas[:6])); continue
+        f = vs[0] if vs[0] not in p["cache"] and vs[0].startswith("?") else random.choice(vs)
+        if f not in p["cache"]:
+            if abiertas >= 3: p["estado"] = "Busqué en 3 fuentes sin encontrar un reel válido; sigo en el próximo ciclo."; guardar_fb(p); return []
+            abiertas += 1; p["estado"] = f"Buscando en Facebook (segundo plano): {f}"; guardar_fb(p)
+            try: lst = facebook.listar(facebook.url_fuente(f), log, scrolls=8)
+            except Exception as e: lst = []; log(f"Facebook: error leyendo {f}: {str(e)[:80]}")
+            if not lst:
+                mot = facebook.MOTIVO.get("m")
+                if mot in ("login", "captcha", "sin_chrome"): p["estado"] = MSG_FB[mot]; guardar_fb(p); log("Facebook: " + p["estado"]); return []
+                p["muertas"].append(f); log(f"Facebook: {f} no devolvió reels, la descarto"); continue
+            p["cache"][f] = lst
+        v, contd = elegir_de(p["cache"][f], f)
+        if v: return tomar(v, f)
+        if not libres(p["cache"][f]) and f not in p["muertas"]: p["muertas"].append(f)
+    p["estado"] = "Revisé reels y ninguno sirvió; pruebo otras fuentes en el próximo ciclo."; guardar_fb(p); return []
