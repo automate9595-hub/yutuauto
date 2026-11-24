@@ -1,7 +1,7 @@
 """Yutu worker: descarga -> recorte -> efectos -> subtitulos -> subida a YouTube Studio (sin Google Cloud)."""
 import json, math, os, re, shutil, subprocess, sys, time, pathlib, urllib.request, datetime as dt
 import threading, concurrent.futures as cf
-import efectos, ia, voz, cdp, titulos
+import efectos, ia, voz, cdp, titulos, tiktok
 ROOT = pathlib.Path(__file__).parent
 MEDIA = ROOT / "media"; MEDIA.mkdir(exist_ok=True)
 QF = ROOT / "queue.json"; CF = ROOT / "cancel.json"
@@ -12,6 +12,7 @@ class SubidaInterrumpida(Exception): pass
 
 MAX_INTENTOS = 5      # reintentos dentro de una misma subida (reanuda sola)
 MAX_AUTO = 8          # reintentos automáticos posteriores (los lanza el vigilante del servidor)
+MAX_SHORT = 180       # YouTube Shorts admite hasta 3 minutos
 STALL_S = 420         # si el % no avanza en 7 min, se considera cortada
 
 def fid(it):
@@ -84,40 +85,43 @@ def expand(d):
         if it["key"] not in seen: seen.add(it["key"]); res.append(it)
     d["items"] = res
 
-def _imp(url=""):
-    a = []
-    try: import curl_cffi; a = ["--impersonate", "chrome"]
-    except Exception: pass
-    ck = ROOT / "tiktok-cookies.txt"
-    if "tiktok.com" in str(url) and ck.exists(): a += ["--cookies", str(ck)]          # sesión del Chrome del worker: TikTok no bloquea la descarga
-    return a
-
 def download(it, src, cb=None):
+    """Descarga con yt-dlp probando varias variantes (Chrome simulado / cookies / simple). Si es TikTok y ninguna sirve,
+    baja el archivo con el Chrome del worker. El error que se muestra es el REAL, no un 'returned non-zero'."""
     cb = cb or (lambda f: set_prog(it, "dl", f))
-    cmd = [sys.executable, "-m", "yt_dlp", "--newline", "-N", "4", "--retries", "5", "--fragment-retries", "5", "--no-mtime"] + _imp(it.get("url")) + [ "--progress-template", "download:[DL] %(progress._percent_str)s",
-           "--ffmpeg-location", FFMPEG, "-f", "bv*[height<=1080][ext=mp4]+ba[ext=m4a]/bv*[height<=1080]+ba/b",
-           "--merge-output-format", "mp4", "--no-playlist", "-o", str(MEDIA / f"{it['id']}.%(ext)s"), it["url"]]
-    p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding="utf-8", errors="replace")
-    idx, last, tail = 0, 0.0, []
-    for line in p.stdout:
-        if cancel_requested(it): p.terminate(); raise Cancelled()
-        m = re.search(r"\[DL\]\s*([\d.]+)%", line)
-        if m:
-            v = float(m.group(1))
-            if v < last - 20: idx = 1                      # empezo el segundo flujo (audio)
-            last = v
-            cb((0.85 * v / 100) if idx == 0 else 0.85 + 0.15 * v / 100)
-        else: tail.append(line.strip())
-    if p.wait() != 0: raise RuntimeError("yt-dlp fallo: " + " ".join(tail[-3:])[:200])
-    cb(1.0)
+    url = it.get("url") or ""; ultimo = ""
+    for var in tiktok.variantes(url):
+        cmd = [sys.executable, "-m", "yt_dlp", "--newline", "-N", "4", "--retries", "5", "--fragment-retries", "5", "--no-mtime"] + var + ["--progress-template", "download:[DL] %(progress._percent_str)s",
+               "--ffmpeg-location", FFMPEG, "-f", "bv*[height<=1080][ext=mp4]+ba[ext=m4a]/bv*[height<=1080]+ba/b",
+               "--merge-output-format", "mp4", "--no-playlist", "-o", str(MEDIA / f"{it['id']}.%(ext)s"), url]
+        p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding="utf-8", errors="replace")
+        idx, last, tail = 0, 0.0, []
+        for line in p.stdout:
+            if cancel_requested(it): p.terminate(); raise Cancelled()
+            m = re.search(r"\[DL\]\s*([\d.]+)%", line)
+            if m:
+                v = float(m.group(1))
+                if v < last - 20: idx = 1                      # empezo el segundo flujo (audio)
+                last = v
+                cb((0.85 * v / 100) if idx == 0 else 0.85 + 0.15 * v / 100)
+            else: tail.append(line.strip())
+        if p.wait() == 0 and src.exists(): cb(1.0); return
+        if p.returncode == 0: ultimo = "yt-dlp terminó pero no dejó el archivo"
+        else: ultimo = tiktok.limpiar_error("\n".join(tail))
+        print("  yt-dlp:", ultimo[:160])
+    if "tiktok.com" in url:
+        print("  yt-dlp no pudo con TikTok: pruebo con el Chrome del worker...")
+        try: tiktok.descargar_web(url, src, cb, lambda: check_cancel(it)); return
+        except Cancelled: raise
+        except Exception as e: ultimo += " | Chrome del worker: " + str(e)[:150]
+    raise RuntimeError("No se pudo descargar: " + ultimo[:300])
 
 PRE_INFO, DLP, PRE_PEND = {}, {}, set()
 PRE_SEM = threading.Semaphore(2)        # como mucho 2 videos descargados por adelantado
 _REL = set()
 
 def info_video(it):
-    r = ytdlp("-j", "--no-playlist", *_imp(it["url"]), it["url"], capture_output=True, text=True)
-    return json.loads(r.stdout)
+    return tiktok.info(it["url"])
 
 def prefetch(items):
     """Descarga (y lee los datos de) los siguientes videos mientras el actual se edita: la red y la CPU trabajan a la vez."""
@@ -245,7 +249,7 @@ def window(it, cfg, dur, ai_start=None):
     """Tramo del video original que se conserva: (inicio, duracion)."""
     f = lambda k, d=0: float(cfg.get(k) or d)
     if it["kind"] == "short":
-        L = min(f("short_len", 58), 60, dur)
+        L = min(f("short_len", 58), MAX_SHORT, dur)
         mode = cfg.get("cut_mode", "auto")
         if it.get("split_start") is not None: start = min(max(float(it["split_start"]), 0), max(dur - L, 0))
         elif mode == "inicio" or dur <= L: start = 0
@@ -338,8 +342,8 @@ def split_items(d):
         n = min(int(it.get("n") or cfg.get("split_n") or 1), 30)
         if it.get("kind") != "short" or it.get("type") != "video" or it.get("parts") or "#" in it["key"] or it.get("status") != "pending" or n <= 1:
             out.append(it); continue
-        L = min(float(cfg.get("short_len") or 58), 60)
-        try: dur = json.loads(ytdlp("-j", "--no-playlist", it["url"], capture_output=True, text=True).stdout).get("duration")
+        L = min(float(cfg.get("short_len") or 58), MAX_SHORT)
+        try: dur = info_video(it).get("duration")
         except Exception as e: dur = None; print("  No pude leer la duración para dividir:", str(e)[:100])
         if dur and int(dur // L) < n:
             n = max(1, int(dur // L)); print(f"  El video dura {dur:.0f}s: solo caben {n} Shorts de {L:.0f}s sin repetir partes.")
@@ -370,14 +374,20 @@ def process(it, cfg):
     it["pct"] = 0; it["stage"] = "Preparando"; it.pop("est", None); save(D)
     check_cancel(it)
     info = esperar_pre(it) or info_video(it)
-    it["title"] = info["title"][:90]; dur = info.get("duration") or 60
+    it["title"] = (info.get("title") or it.get("title") or it["url"])[:90]; dur = info.get("duration") or 60
+    if info.get("thumbnail"): it["thumb"] = info["thumbnail"]
+    lo, hi = int(it.get("dmin") or 0), int(it.get("dmax") or 0)           # límite de duración elegido en el piloto
+    if (lo or hi) and info.get("duration"):
+        d0 = float(info["duration"]); fm = lambda x: f"{x / 60:.1f} min".replace(".0 ", " ")
+        if (lo and d0 < lo) or (hi and d0 > hi):
+            raise RuntimeError(f"Descartado: dura {fm(d0)} y tu límite es {fm(lo) if lo else 'sin mínimo'} a {fm(hi) if hi else 'sin máximo'}.")
     if not src.exists():
         print("  [1/3] Descargando...")
         download(it, src)
     else: set_prog(it, "dl", 1.0, True)
     check_cancel(it)
     if short and it.get("parts") and it.get("split_start") is None:
-        planificar_partes(it, cfg, src, dur, min(float(cfg.get("short_len") or 58), 60, dur))
+        planificar_partes(it, cfg, src, dur, min(float(cfg.get("short_len") or 58), MAX_SHORT, dur))
     start, L = window(it, cfg, dur)
     modo, ayuda = cfg.get("ia_mode", "alternar"), []
     if ia_activa(cfg) and cfg.get("ia_cut") and dur > L + 2 and dur <= 1800 and not it.get("_noia") and not it.get("parts"):
@@ -963,6 +973,42 @@ def _detalles(tab, it, titulo, cuerpo, chk):
         tab.captura(ROOT / "aviso-ninos.png"); tab.diagnostico(ROOT / "diagnostico-ninos.txt", "No encontré la opcion de 'para niños'")
     time.sleep(0.6)
 
+JS_DLG_TXT = r"""(function(){var a=window.__A('ytcp-video-share-dialog,ytcp-uploads-dialog,tp-yt-paper-dialog,ytcp-dialog');
+for(var i=0;i<a.length;i++){var r=a[i].getBoundingClientRect();if(r.width>0&&r.height>0){var t=a[i].innerText||'';if(t.trim())return t}}return ''})()"""
+RE_VENTANA_FINAL = re.compile(r"se est[aá] procesando|v[ií]deo publicado|video published|processing|procesamiento|enlace del v", re.I)
+
+def cerrar_cuando_completo(tab, it, t0, size_mb, chk, limite=1200):
+    """Ventana final ('Se está procesando el vídeo' / 'Vídeo publicado'): SOLO cuando el pie dice 'Comprobaciones completadas' toca 'Cerrar'.
+    Mientras dice 'Subiéndose' o 'Comprobando' espera (si se cierra antes, YouTube corta la subida)."""
+    fin = time.time() + limite; sin_ventana = 0; ult = None
+    while time.time() < fin:
+        chk()
+        try: up_progress(tab, it, t0, size_mb)
+        except SubidaInterrumpida: raise
+        except Exception: pass
+        txt = ""
+        try: txt = tab.eval(JS_DLG_TXT) or ""
+        except Exception: pass
+        if not txt.strip():
+            sin_ventana += 1
+            if sin_ventana >= 6: return True                  # no hay ventana: ya se cerró sola
+            time.sleep(1); continue
+        sin_ventana = 0
+        if re.search(r"comprobaciones completadas|checks complete|no se han encontrado problemas|no issues found", txt, re.I):      # SOLO con 'Comprobaciones completadas'
+            try:
+                link = tab.eval("(function(){var a=window.__A(\"a[href*='youtu.be/'],a[href*='youtube.com/shorts/'],a[href*='youtube.com/watch']\");for(var i=0;i<a.length;i++){var r=a[i].getBoundingClientRect();if(r.width>0)return a[i].href}return ''})()")
+                if link: it["yt_url"] = link
+            except Exception: pass
+            print("  Comprobaciones completadas en la ventana final: toco 'Cerrar'.")
+            paso("comprobaciones completadas: cerrando la ventana")
+            if not tab.clic_texto(r"^(cerrar|close)$", TAGS_BOTON): _clic_primero(tab, ["ytcp-video-share-dialog #close-button", "#close-button", "ytcp-button#close-button"])
+            time.sleep(1.5)
+            continue                                          # si la ventana ya no está, el siguiente giro devuelve True
+        if txt != ult: print("  Ventana final: esperando a que Studio termine de comprobar…"); ult = txt
+        paso("ventana final abierta: espero 'Comprobaciones completadas' para cerrar")
+        time.sleep(1.5)
+    return False
+
 def _cierre_dialogo(tab, cid, it, chk, t0, size_mb, now_mode, when):
     """Desde 'Siguiente' hasta publicar, dentro del cuadro de subida (Detalles -> Elementos -> Comprobaciones -> Visibilidad)."""
     avanzar_hasta_visibilidad(tab, it, t0, size_mb, chk); capturar_id(tab, it)
@@ -989,7 +1035,9 @@ def _cierre_dialogo(tab, cid, it, chk, t0, size_mb, now_mode, when):
         if forzado == 0 and int(time.time() - fin) % 25 == 0 and tab.habilitado("#done-button"): tab.clic_visible("#done-button", True, True)   # el clic no se registro: reintento
         time.sleep(1)
     time.sleep(2)
-    esperar_subida_terminada(tab, it, t0, size_mb, chk)      # <- antes de cerrar el diálogo o abrir otra página
+    if cerrar_cuando_completo(tab, it, t0, size_mb, chk):    # espera "Comprobaciones completadas" y toca Cerrar
+        _finalizar(tab, cid, it, chk, now_mode); return
+    esperar_subida_terminada(tab, it, t0, size_mb, chk)      # respaldo: antes de cerrar el diálogo o abrir otra página
     try:
         link = tab.eval("(function(){var a=window.__A(\"a[href*='youtu.be/'],a[href*='youtube.com/shorts/'],a[href*='youtube.com/watch']\");"
                         "for(var i=0;i<a.length;i++){var r=a[i].getBoundingClientRect();if(r.width>0)return a[i].href}return ''})()")
@@ -1291,7 +1339,7 @@ def main():
             except Cancelled:
                 it["status"] = "cancelled"; it["stage"] = "Cancelado"; print("Cancelado:", it.get("title") or it.get("url"))
             except Exception as e:
-                it["status"] = "error"; it["stage"] = "Error"; it["error"] = str(e)[:300]; print("ERROR:", e)
+                it["status"] = "error"; it["stage"] = "Error"; it["error"] = str(e)[:400]; print("ERROR:", e)
             if it.get("id") and it["id"] not in _REL: _REL.add(it["id"]); PRE_SEM.release()
             save(d)
     hilo = threading.Thread(target=productor, daemon=True); hilo.start()

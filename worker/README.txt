@@ -1,4 +1,24 @@
+YUTU WORKER (v22)
+
+NOVEDADES v22
+- DURACIONES EN MINUTOS: el límite de duración de los videos que buscan los pilotos, la duración del Short, el inicio del recorte y la duración
+  del Short del Creador IA se escriben en MINUTOS (admite decimales: 0,5 = 30 s) y hay un selector para pasar a segundos. Los Shorts pueden
+  durar hasta 3 minutos (YouTube ya lo permite).
+- TIKTOK NO DESCARGABA ("Command ... returned non-zero exit status"): ahora la descarga prueba varias formas (Chrome simulado + cookies, solo
+  cookies, simple) y, si TikTok sigue bloqueando a yt-dlp, baja el video con el Chrome del worker. Si falla, la tarjeta muestra la causa REAL.
+- TIKTOK POR TEMA: busca el tema directo en TikTok (buscador) además de los hashtags/cuentas que propone la IA; si TikTok pide login o captcha
+  ya no descarta las fuentes, avisa qué hacer.
+- TIKTOK POR CUENTA: la cuenta se lee primero con el Chrome del worker (espera a que carguen los videos y baja con scroll) y después con yt-dlp.
+- BOTONES NUEVOS "Iniciar sesión en TikTok" y "Ya inicié sesión: comprobar" (pestañas TikTok · cuenta y TikTok · tema). Se inicia sesión UNA vez
+  en la ventana de Chrome del worker; las cookies se guardan solas y se usan para leer y descargar.
+- El límite de duración también se vuelve a comprobar al descargar (cuando la lista de TikTok no trae la duración).
+- Para que yt-dlp y curl_cffi sean compatibles, volvé a ejecutar 2-INSTALAR-Y-EJECUTAR.bat.
+
 YUTU WORKER (v18)
+
+NOVEDADES v21
+- Ventana final "Se está procesando el vídeo": solo cuando el pie dice "Comprobaciones completadas" toca "Cerrar" (mientras sube/comprueba, espera).
+- Límite de duración (mínimo y máximo, en segundos) para los videos que buscan los pilotos de YouTube, Shorts de YouTube y los dos de TikTok.
 
 NOVEDADES v19
 - WORKER ESTABLE: ahora corre bajo un supervisor (si se cae, se levanta solo), el trabajo pesado va con menos prioridad (el panel ya no

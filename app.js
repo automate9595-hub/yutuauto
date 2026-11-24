@@ -3,13 +3,15 @@ const load=(k,d)=>{try{const v=JSON.parse(localStorage.getItem(k));return v===nu
 let q=load(K,[]);if(!Array.isArray(q))q=[];
 const DEF={sn:3,st:"09:00,14:00,20:00",vn:2,vt:"12:00,18:00",publish:"now",
 sub:true,lang:"es-latino",stt:"auto",model:"small",sub_pos:"bottom",sub_size:"m",sub_color:"white",sub_words:"",sub_caps:false,
-cut_mode:"auto",cut_start:0,short_len:58,frame:"crop",vid_trim:false,vid_start:0,vid_len:0,
+cut_mode:"auto",cut_start:0,short_len:60,frame:"crop",vid_trim:false,vid_start:0,vid_len:0,
 fx_list:[],fx_mode:"seq",fx_dur:3,fx_gap:0,fx_blend:0.6,fx_power:1,fx_start:0,fx_repeat:true,
 vivid:false,vignette:false,fade:false,loudnorm:false,
 ia_mode:"alternar",ia_cut:true,ia_fx:true,ia_zoom:true,lista_cada:0,ia_sub:true,ia_text:true,
 split_n:1,split_gap:6,split_mode:"auto",auto_reanudar:true};
 let saved=load(C,null);if(saved===null){saved=load(C_OLD,{});delete saved.publish}   /* migra la config anterior; la publicación vuelve a "inmediata" */
 let cfg=Object.assign({},DEF,saved);if(String(cfg.ia_mode).includes("grok"))cfg.ia_mode=String(cfg.ia_mode).replace("grok","groq");
+if(+cfg.short_len===58)cfg.short_len=60;
+const fmtDur=sec=>{sec=+sec||0;if(sec<60)return sec+" s";const m=+(sec/60).toFixed(2);return m+" min"};
 const saveCfg=()=>{try{localStorage.setItem(C,JSON.stringify(cfg))}catch{}};
 
 function parse(raw){try{const u=new URL(raw.trim()),h=u.hostname.replace(/^www\./,"").toLowerCase();
@@ -47,7 +49,7 @@ set(2,q.length?`${q.length} en cola · ${sh} Shorts · ${q.length-sh} videos`:"P
 set(3,cfg.sub?`${L.lang[cfg.lang]||cfg.lang} · ${L.stt[cfg.stt]||cfg.stt}`:"Sin subtítulos",true);
 $("g-voz").textContent=cfg.sub?(L.stt[cfg.stt]||""):"";$("g-asp").textContent=({bottom:"abajo",middle:"centro",top:"arriba"})[cfg.sub_pos]+" · "+({s:"pequeño",m:"mediano",l:"grande"})[cfg.sub_size];
 $("g-split").textContent=(+cfg.split_n||1)>1?cfg.split_n+" por video":"";
-set(4,`${(+cfg.split_n||1)>1?cfg.split_n+' Shorts por video (1 cada '+(cfg.split_gap||0)+' h) · ':''}Short ${cfg.short_len||58} s · ${({auto:"tramo automático",inicio:"desde el inicio",manual:"desde el seg. "+cfg.cut_start})[cfg.cut_mode]}${cfg.vid_trim?" · videos recortados":""}`,true);
+set(4,`${(+cfg.split_n||1)>1?cfg.split_n+' Shorts por video (1 cada '+(cfg.split_gap||0)+' h) · ':''}Short ${fmtDur(cfg.short_len||60)} · ${({auto:"tramo automático",inicio:"desde el inicio",manual:"desde "+fmtDur(cfg.cut_start)})[cfg.cut_mode]}${cfg.vid_trim?" · videos recortados":""}`,true);
 const ac=["vivid","vignette","fade","loudnorm"].filter(k=>cfg[k]).length;
 set(5,`${cfg.fx_list.length?cfg.fx_list.length+" efectos":"Sin efectos"}${ac?" · "+ac+" de acabado":""}`,true);
 const tareas=["ia_text","ia_cut","ia_sub","ia_fx","ia_zoom"].filter(k=>cfg[k]).length;
@@ -145,7 +147,7 @@ st==="ready"?`<button class="btn pri sm" data-act="now" data-k="${k}">Subir ahor
 BUSY.includes(st)?`<button class="btn ghost sm danger" data-act="cancel" data-k="${k}">Cancelar</button>`:"",
 x.error?`<button class="btn ghost sm" data-act="diag" data-k="${k}">Ver diagnóstico</button>`:""].join("");
 const link=x.yt_url?`<a class="yl" href="${esc(x.yt_url)}" target="_blank" rel="noopener">Ver en YouTube ↗</a>`:"";
-return `<div class="pc">${x.type==="video"?`<img loading="lazy" src="https://i.ytimg.com/vi/${esc(x.id||"")}/mqdefault.jpg" alt="" onerror="this.style.visibility='hidden'">`:""}<div><b>${esc(x.ia_title||x.title||x.url||"")}</b><span class="st ${esc(st)}">${ST[st]||esc(st)}</span><small>${x.kind==="short"?"Short":"Video"}${x.parts>1?" · Parte "+x.part+"/"+x.parts:""}${x.reanudar&&x.status==="ready"?" · se reanuda sola":""}${x.publishAt?" · "+new Date(x.publishAt).toLocaleString("es",{dateStyle:"medium",timeStyle:"short"}):""}</small>
+return `<div class="pc">${x.type==="video"&&(x.thumb||x.origen!=="tiktok")?`<img loading="lazy" src="${esc(x.thumb||"https://i.ytimg.com/vi/"+(x.id||"")+"/mqdefault.jpg")}" alt="" referrerpolicy="no-referrer" onerror="this.style.visibility='hidden'">`:""}<div><b>${esc(x.ia_title||x.title||x.url||"")}</b><span class="st ${esc(st)}">${ST[st]||esc(st)}</span><small>${x.kind==="short"?"Short":"Video"}${x.parts>1?" · Parte "+x.part+"/"+x.parts:""}${x.reanudar&&x.status==="ready"?" · se reanuda sola":""}${x.publishAt?" · "+new Date(x.publishAt).toLocaleString("es",{dateStyle:"medium",timeStyle:"short"}):""}</small>
 <div style="height:10px;border-radius:99px;background:#1a2538;overflow:hidden;margin:10px 0 4px"><span style="display:block;height:100%;width:${pct}%;min-width:${pct?4:0}px;border-radius:99px;background:${["error","cancelled"].includes(st)?"#8a5a66":BUSY.includes(st)?"#5b86ff":"#45c79b"}"></span></div><small class="pgt">${label}</small>${x.ia?`<small class="pgt">Ayuda IA: ${esc(x.ia)}</small>`:""}${link}${x.aviso?`<small class="err">⚠ ${esc(x.aviso)}</small>`:""}${x.error?`<small class="err">${esc(x.error)}</small>`:""}${acts?`<div class="acts">${acts}</div>`:""}</div></div>`}).join("")}
 $("pub").onclick=async e=>{const b=e.target.closest("[data-act]");if(!b)return;const k=b.dataset.k,a=b.dataset.act;
 if(a==="prev"){const it=W.items.find(y=>y.key===k)||{},id=it.fid||k.split(":")[1].split("#")[0];openWin("Vista previa del video editado",`<video controls autoplay playsinline style="width:100%;max-height:70vh;border-radius:10px;background:#000" src="${API}/media/${encodeURIComponent(id)}_final.mp4"></video><p class="sub">Es el archivo ya editado, tal como se va a subir.</p>`);return}
@@ -212,7 +214,7 @@ setInterval(tmPoll,8000);tmPoll();
 const PI_K="yutu-piloto-ia",IDI={"es-MX":"Español latino (México)","es-AR":"Español latino (Argentina)","es-CO":"Español latino (Colombia)","es-US":"Español latino (EE. UU.)","es-ES":"Español (España)","en-US":"Inglés","pt-BR":"Portugués (Brasil)","fr-FR":"Francés","de-DE":"Alemán","it-IT":"Italiano"};
 const pi=Object.assign({tema:"",shorts:5,dias:30,duracion:45,voz:"alternar",estilo:"",idiomas:["es-MX"]},load(PI_K,{}));if(!Array.isArray(pi.idiomas)||!pi.idiomas.length)pi.idiomas=["es-MX"];
 const piSave=()=>{try{localStorage.setItem(PI_K,JSON.stringify(pi))}catch{}};
-const piIds={tema:"pi-tema",shorts:"pi-shorts",dias:"pi-dias",duracion:"pi-dur",voz:"pi-voz",estilo:"pi-estilo"};
+const piIds={tema:"pi-tema",shorts:"pi-shorts",dias:"pi-dias",voz:"pi-voz",estilo:"pi-estilo"};
 for(const k in piIds){const el=$(piIds[k]);el.value=pi[k];el.oninput=()=>{pi[k]=el.type==="number"?Math.max(0,+el.value||0):el.value;piSave()}}
 function piChips(){$("pi-idiomas").innerHTML=Object.keys(IDI).map(k=>`<label class="fxc${pi.idiomas.includes(k)?" on":""}"><input type="checkbox" data-pi="${k}" ${pi.idiomas.includes(k)?"checked":""}><span>${IDI[k]}</span></label>`).join("")}
 $("pi-idiomas").onchange=e=>{const k=e.target.dataset.pi;if(!k)return;pi.idiomas=pi.idiomas.filter(x=>x!==k);if(e.target.checked)pi.idiomas.push(k);if(!pi.idiomas.length)pi.idiomas=["es-MX"];piSave();piChips()};piChips();
@@ -254,3 +256,35 @@ const on={yts:s.piloto_yts,piloto:s.piloto,tiktok:s.tiktok,"tema-tt":s.tema_tt,p
 PT.forEach(k=>{const d=$("d-"+k);if(d)d.classList.toggle("act",!!(on[k]&&on[k].activo))});
 const e=s.piloto_yts;if(e&&e.tema)$("ys-estado").textContent=(e.activo?"🟢 Activo · ":"⏸ En pausa · ")+(e.estado||"Buscando el primer Short…")}
 setInterval(()=>{if(!document.hidden)tabsPoll()},8000);tabsPoll();
+
+
+/* ---------- duraciones: se escriben en MINUTOS (se puede cambiar a segundos). Se guardan en segundos ---------- */
+const unitGet=id=>{try{return localStorage.getItem("yutu-u-"+id)||"m"}catch{return"m"}};
+const unitSet=(id,u)=>{try{localStorage.setItem("yutu-u-"+id,u)}catch{}};
+const secShow=(sec,u)=>{sec=+sec||0;return sec?String(+(u==="m"?sec/60:sec).toFixed(2)):""};
+const secRead=(v,u)=>{const n=Math.max(0,parseFloat(String(v).replace(",","."))||0);return Math.round(n*(u==="m"?60:1))};
+function unitCtl(id,getSec,setSec,maxSec){const el=$("u-"+id),us=$("us-"+id);if(!el||!us)return;
+us.value=unitGet(id);el.value=secShow(getSec(),us.value);
+el.oninput=()=>{let v=secRead(el.value,us.value);if(maxSec&&v>maxSec){v=maxSec;el.value=secShow(v,us.value)}setSec(v)};
+us.onchange=()=>{unitSet(id,us.value);el.value=secShow(getSec(),us.value)}}
+unitCtl("short_len",()=>cfg.short_len,v=>{cfg.short_len=v||60;saveCfg();render()},180);
+unitCtl("vid_start",()=>cfg.vid_start,v=>{cfg.vid_start=v;saveCfg();render()},86400);
+unitCtl("cut_start",()=>cfg.cut_start,v=>{cfg.cut_start=v;saveCfg();render()},86400);
+unitCtl("pi-dur",()=>pi.duracion,v=>{pi.duracion=Math.max(20,v||45);piSave()},180);
+
+/* ---------- límite de duración (mínimo / máximo) de los videos que busca cada piloto ---------- */
+function rangoCtl(secId,obj,saveFn){const cfgDiv=document.querySelector("#"+secId+" .cfg");if(!cfgDiv)return;
+const lab=document.createElement("label");lab.style.gridColumn="1/-1";
+lab.innerHTML='Duración de los videos que busca<span class="two" style="grid-template-columns:1fr 1fr 110px"><input type="number" min="0" step="any" placeholder="Mínimo (sin límite)" data-r="dmin"><input type="number" min="0" step="any" placeholder="Máximo (sin límite)" data-r="dmax"><select><option value="m">minutos</option><option value="s">segundos</option></select></span><small class="sub">Ej.: mínimo 1 y máximo 10 minutos. Vacío = sin límite. Se admiten decimales (0,5 = 30 s).</small>';
+cfgDiv.appendChild(lab);const us=lab.querySelector("select");us.value=obj.dunit==="s"?"s":"m";
+const ins=[...lab.querySelectorAll("input")],paint=()=>ins.forEach(el=>el.value=secShow(obj[el.dataset.r],us.value));paint();
+ins.forEach(el=>el.oninput=()=>{obj[el.dataset.r]=secRead(el.value,us.value);saveFn()});
+us.onchange=()=>{obj.dunit=us.value;paint();saveFn()}}
+rangoCtl("yts",ys,ysSave);rangoCtl("piloto",pl,()=>{try{localStorage.setItem(PL_K,JSON.stringify(pl))}catch{}});
+rangoCtl("tiktok",tt,()=>{try{localStorage.setItem(TT_K,JSON.stringify(tt))}catch{}});rangoCtl("tema-tt",tm,()=>{try{localStorage.setItem(TM_K,JSON.stringify(tm))}catch{}});
+
+/* ---------- sesión de TikTok (en el Chrome del worker) ---------- */
+function ttLogin(pre){const m=$(pre+"-lmsg");if(!m)return;
+$(pre+"-login").onclick=async()=>{m.textContent="Abriendo TikTok…";const r=await call("/tiktok-login",{accion:"abrir"},15000);m.textContent=r?r.message:"No encuentro el worker. Ejecutá 2-INSTALAR-Y-EJECUTAR.bat."};
+$(pre+"-chk").onclick=async()=>{m.textContent="Comprobando…";const r=await call("/tiktok-login",{accion:"comprobar"},40000);m.textContent=r?r.message:"No encuentro el worker. Ejecutá 2-INSTALAR-Y-EJECUTAR.bat."}}
+ttLogin("tt");ttLogin("tm");

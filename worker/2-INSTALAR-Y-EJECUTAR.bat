@@ -12,7 +12,7 @@ if errorlevel 1 (
 )
 
 echo Instalando componentes con pip (la primera vez puede tardar unos minutos)...
-python -m pip install -q --disable-pip-version-check -U yt-dlp
+python -m pip install -q --disable-pip-version-check -U "yt-dlp[default,curl-cffi]"
 python -m pip install -q --disable-pip-version-check imageio-ffmpeg pystray pillow
 python -m pip install -q --disable-pip-version-check edge-tts curl_cffi
 if errorlevel 1 (

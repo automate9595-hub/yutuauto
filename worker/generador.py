@@ -40,7 +40,7 @@ def configurar(d):
     tema = str(d.get("tema", p.get("tema", ""))).strip()[:140]
     if tema != p.get("tema"): p.update(ideas=[], inicio=None, hoy={})
     p.update(activo=bool(d.get("activo")), tema=tema, shorts=max(1, min(int(d.get("shorts", 5)), 40)), dias=max(1, min(int(d.get("dias", 30)), 365)),
-             idiomas=idiomas, cada=max(0, min(int(d.get("cada", 0) or 0), 1440)), duracion=max(20, min(int(d.get("duracion", 45)), 58)),
+             idiomas=idiomas, cada=max(0, min(int(d.get("cada", 0) or 0), 1440)), duracion=max(20, min(int(d.get("duracion", 45)), 180)),
              voz=d.get("voz") if d.get("voz") in ("hombre", "mujer", "alternar") else "alternar", estilo=str(d.get("estilo", p.get("estilo", "")))[:160])
     if p["activo"] and not p.get("inicio"): p["inicio"] = hoy
     for k in ("ideas", "hist"): p.setdefault(k, [])
@@ -85,7 +85,7 @@ def _limpio(t):
 def idear_y_escribir(it, p_ideas):
     """Devuelve (escenas, meta, ayuda). Tres pasos, cada uno empieza con una IA distinta (las demas respaldan)."""
     cod = it["idioma"]; nom, _, habla = IDIOMAS[cod]; tema = it["tema"]; dur = int(it.get("duracion") or 45)
-    palabras = int(dur * 2.5); n = 6 if dur <= 40 else 7
+    palabras = int(dur * 2.5); n = 6 if dur <= 40 else 7 if dur <= 70 else min(16, round(dur / 9))
     usadas = "\n".join("- " + x for x in p_ideas[-50:]) or "(ninguna)"
     estilo = (it.get("estilo") or "").strip()
     d1, a1 = _ia("gemini_primero", f'''Eres guionista de Shorts virales. Tema central: «{tema}». {("Estilo: " + estilo + ".") if estilo else ""}
@@ -100,7 +100,7 @@ Idioma: {habla}. Divide en {n} escenas; "texto" es lo que se NARRA (sin emojis n
 Responde SOLO este JSON: {{"escenas": [{{"texto": "...", "imagen": "..."}}]}}''')
     esc = [{"texto": _limpio(e.get("texto")), "imagen": _limpio(e.get("imagen")) or tema} for e in (d2.get("escenas") or []) if isinstance(e, dict) and _limpio(e.get("texto"))]
     if len(esc) < 3: raise RuntimeError("El guion salió incompleto.")
-    esc = esc[:9]
+    esc = esc[:max(9, n + 2)]
     prohib = titulos.usados([i for i in it.get("_prohibidos", [])])
     d3, a3 = _ia("claude_primero", f'''Eres editor de YouTube. Para este Short ({idea}) con guion: «{" ".join(e["texto"] for e in esc)[:900]}»
 escribe título y descripción en {nom}. Título de máximo 85 caracteres, con gancho, claramente DISTINTO de estos ya usados:

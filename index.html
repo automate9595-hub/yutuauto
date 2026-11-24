@@ -47,17 +47,19 @@
 <label>Videos por día<input id="tt-dia" type="number" min="1" max="60"></label>
 <label>Durante (días)<input id="tt-dias" type="number" min="1" max="365"></label></div>
 <label class="chk"><input id="tt-ver" type="checkbox"> La IA verifica que sea de Mobile Legends antes de descargar</label>
+<div class="row"><button class="btn ghost sm" id="tt-login" type="button">🔑 Iniciar sesión en TikTok</button><button class="btn ghost sm" id="tt-chk" type="button">Ya inicié sesión: comprobar</button><small id="tt-lmsg" class="sub">Con la sesión iniciada TikTok no bloquea la lectura ni las descargas.</small></div>
 <div class="row"><button class="btn pri" id="tt-on" type="button">Activar piloto TikTok ▶</button><button class="btn ghost" id="tt-off" type="button">Pausar</button><span id="tt-msg" class="msg"></span></div>
 <small id="tt-estado" class="sub"></small></section>
 
 <section class="card pad" id="tema-tt" style="display:grid;gap:12px;margin:0 0 16px">
 <h3 style="margin:0">🎲 Piloto TikTok por tema: la IA busca las fuentes</h3>
-<p class="sub" style="margin:0">Escribí solo el tema. La IA propone hashtags y cuentas de TikTok distintas, toma videos al azar, verifica que sean del tema y los sube a tu canal. Nunca repite.</p>
+<p class="sub" style="margin:0">Escribí solo el tema. Busca ese tema directo en TikTok y además la IA propone hashtags y cuentas distintas; toma videos al azar, verifica que sean del tema y los sube a tu canal. Nunca repite.</p>
 <div class="row"><input id="tm-tema" type="search" placeholder="Tema central · ej: Mobile Legends" style="flex:1;min-width:220px" autocomplete="off"></div>
 <div class="cfg" style="grid-template-columns:repeat(auto-fit,minmax(130px,1fr))">
 <label>Shorts por día<input id="tm-shorts" type="number" min="0" max="60"></label>
 <label>Videos por día<input id="tm-videos" type="number" min="0" max="30"></label>
 <label>Durante (días)<input id="tm-dias" type="number" min="1" max="365"></label></div>
+<div class="row"><button class="btn ghost sm" id="tm-login" type="button">🔑 Iniciar sesión en TikTok</button><button class="btn ghost sm" id="tm-chk" type="button">Ya inicié sesión: comprobar</button><small id="tm-lmsg" class="sub">Con la sesión iniciada TikTok no bloquea la lectura ni las descargas.</small></div>
 <div class="row"><button class="btn pri" id="tm-on" type="button">Activar piloto ▶</button><button class="btn ghost" id="tm-off" type="button">Pausar</button><span id="tm-msg" class="msg"></span></div>
 <small id="tm-estado" class="sub"></small></section>
 
@@ -68,7 +70,7 @@
 <div class="cfg" style="grid-template-columns:repeat(auto-fit,minmax(130px,1fr))">
 <label>Shorts por día<input id="pi-shorts" type="number" min="1" max="40"></label>
 <label>Durante (días)<input id="pi-dias" type="number" min="1" max="365"></label>
-<label>Duración (s)<input id="pi-dur" type="number" min="20" max="58"></label>
+<label>Duración del Short (máx. 3 min)<span class="two"><input id="u-pi-dur" type="number" min="0" step="any" placeholder="0.75"><select id="us-pi-dur"><option value="m">minutos</option><option value="s">segundos</option></select></span></label>
 <label>Voz<select id="pi-voz"><option value="alternar">Alternar</option><option value="hombre">Hombre</option><option value="mujer">Mujer</option></select></label></div>
 <div><small class="sub">Idiomas de los videos (si marcás varios, van rotando):</small>
 <div id="pi-idiomas" class="chips" style="margin-top:6px"></div></div>
@@ -115,8 +117,8 @@
 <div class="stp-b">
 <div class="grp open"><button class="grp-h" type="button">Shorts (vertical 9:16)</button><div class="grp-b cfg">
 <label>Qué tramo usar<select id="c-cut_mode"><option value="auto">Automático (la IA elige el mejor; si no, desde el 10 %)</option><option value="inicio">Desde el inicio</option><option value="manual">Segundo exacto</option></select></label>
-<label>Segundo de inicio (solo "Segundo exacto")<input id="c-cut_start" type="number" min="0"></label>
-<label>Duración (máx. 60 s)<input id="c-short_len" type="number" min="5" max="60"></label>
+<label>Inicio del tramo (solo "Segundo exacto")<span class="two"><input id="u-cut_start" type="number" min="0" step="any" placeholder="0"><select id="us-cut_start"><option value="m">minutos</option><option value="s">segundos</option></select></span></label>
+<label>Duración del Short (máx. 3 min)<span class="two"><input id="u-short_len" type="number" min="0" step="any" placeholder="1"><select id="us-short_len"><option value="m">minutos</option><option value="s">segundos</option></select></span></label>
 <label>Encuadre vertical<select id="c-frame"><option value="crop">Recorte al centro</option><option value="blur">Completo con fondo difuminado</option></select></label></div></div>
 <div class="grp open"><button class="grp-h" type="button">Varios Shorts de un mismo video largo <small id="g-split"></small></button><div class="grp-b cfg">
 <p class="sub">Dale un video largo, elegí cuántos Shorts querés sacar y cada cuántas horas sale uno. El primero se publica enseguida (o en el próximo horario si programás) y los demás van espaciados. También podés cambiar la cantidad en cada video desde la cola (paso 2).</p>
@@ -125,7 +127,7 @@
 <label>Cómo elegir los tramos<select id="c-split_mode"><option value="auto">La IA elige los mejores momentos (si no hay IA, reparte parejo)</option><option value="even">Repartidos parejo a lo largo del video</option></select></label></div></div>
 <div class="grp"><button class="grp-h" type="button">Videos normales</button><div class="grp-b cfg">
 <label class="chk"><input id="c-vid_trim" type="checkbox"> Recortar también los videos largos</label>
-<label>Inicio (segundos)<input id="c-vid_start" type="number" min="0"></label>
+<label>Inicio del recorte<span class="two"><input id="u-vid_start" type="number" min="0" step="any" placeholder="0"><select id="us-vid_start"><option value="m">minutos</option><option value="s">segundos</option></select></span></label>
 <label>Duración máxima (minutos, 0 = hasta el final)<input id="c-vid_len" type="number" min="0"></label></div></div>
 <div class="nav-step"><button class="btn ghost" data-go="3" type="button">← Atrás</button><button class="btn pri" data-go="5" type="button">Siguiente: efectos →</button></div></div></section>
 

@@ -1,5 +1,5 @@
 """Servidor local: conecta la web con el worker (solo 127.0.0.1)."""
-import ia, piloto, generador, json, os, pathlib, socket, subprocess, sys, threading, time, urllib.request
+import ia, piloto, generador, tiktok, json, os, pathlib, socket, subprocess, sys, threading, time, urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 ROOT = pathlib.Path(__file__).parent
 MEDIA = ROOT / "media"
@@ -299,6 +299,14 @@ class H(BaseHTTPRequestHandler):
         if self.path == "/ia-test":
             ok, msg = ia.probar(data.get("proveedor", ""))
             return self._send({"ok": ok, "message": msg})
+        if self.path == "/tiktok-login":             # sesión de TikTok en el Chrome del worker (mejora lectura de cuentas, búsquedas y descargas)
+            if data.get("accion") == "abrir":
+                if not launch_chrome(): return self._send({"ok": False, "message": "No encontré Chrome ni Edge."})
+                open_tab("https://www.tiktok.com/login")
+                return self._send({"ok": True, "message": "Abrí TikTok en la ventana de Chrome del worker. Iniciá sesión ahí y después tocá «Ya inicié sesión»."})
+            if not port_open(): return self._send({"ok": False, "message": "El Chrome del worker no está abierto. Tocá primero «Iniciar sesión en TikTok»."})
+            ok = tiktok.sesion_iniciada()
+            return self._send({"ok": ok, "login": ok, "message": "Sesión de TikTok detectada y guardada ✓" if ok else "Todavía no veo la sesión de TikTok. Iniciá sesión en la ventana de Chrome y probá de nuevo."})
         if self.path == "/piloto":                   # piloto automático: tema + cupo diario + días
             try:
                 p = piloto.configurar(data)
