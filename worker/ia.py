@@ -4,12 +4,15 @@ Regla de oro: la IA SOLO sugiere. Todo se valida y, si una IA falla, tarda o res
 se prueba con la otra y, si tampoco, la edicion sigue con tu configuracion normal.
 Las claves viven solo en claves-ia.json (esta carpeta). No se suben a GitHub ni salen en la web.
 """
-import json, os, pathlib, re, socket, time, urllib.error, urllib.request
+import json, os, pathlib, re, socket, threading, time, urllib.error, urllib.request
 import efectos, aprendizaje
 
 ROOT = pathlib.Path(__file__).parent
 KF = ROOT / "claves-ia.json"
 TIMEOUT = 30
+PRESUPUESTO_IA = 60     # tope TOTAL por consulta a la IA: nunca dejar el worker esperando mas de ~1 min
+PRESUPUESTO_PROV = 22   # tope por proveedor (Gemini/Groq/Claude): si uno se cuelga, pasa al siguiente
+_TL = threading.local() # limite de tiempo propio de cada hilo (los subtitulos corren en paralelo)
 NOMBRE = {"gemini": "Gemini", "groq": "Groq", "claude": "Claude"}
 CICLO = ["gemini", "groq", "claude"]
 PATRON = ["gemini", "groq", "gemini", "claude", "gemini"]
@@ -68,6 +71,10 @@ def _http(url, body=None, headers=None):
     if _HASTA[0]:
         t = min(TIMEOUT, _HASTA[0] - time.time())
         if t < 3: raise RuntimeError("Tiempo de espera agotado")
+    dl = getattr(_TL, "hasta", None)
+    if dl:
+        t = min(t, dl - time.time())
+        if t < 2: raise RuntimeError("Tiempo de espera agotado")
     req = urllib.request.Request(url, data=None if body is None else json.dumps(body).encode(), headers=h,
                                  method="GET" if body is None else "POST")
     try:
@@ -233,18 +240,23 @@ def _orden(modo, d):
     return [p for p in base if p in tiene]
 
 def pedir(prompt, modo="alternar"):
-    """-> (dict, proveedor) o (None, None). Nunca lanza excepciones."""
-    d = cargar()
-    for p in [x for x in _orden(modo, d) if x not in _CAIDAS and not _en_pausa(x, d)]:
-        try:
-            data = _json(globals()["_" + p](prompt, d))
-            if isinstance(data, dict):
-                d = cargar(); d["ultimo"] = p; guardar(d)
-                return data, p
-        except Exception as e:
-            if _muerta(e): _CAIDAS.add(p); _pausar(p)
-            print(f"  IA {_explicar(p, e)} Sigo con otra IA o sin IA.")
-    return None, None
+    """-> (dict, proveedor) o (None, None). Nunca lanza excepciones ni espera mas de PRESUPUESTO_IA segundos."""
+    d = cargar(); fin = time.time() + PRESUPUESTO_IA
+    try:
+        for p in [x for x in _orden(modo, d) if x not in _CAIDAS and not _en_pausa(x, d)]:
+            if fin - time.time() < 4: print("  IA: se agotó el tiempo de espera; sigo sin IA."); break
+            _TL.hasta = min(fin, time.time() + PRESUPUESTO_PROV)
+            try:
+                data = _json(globals()["_" + p](prompt, d))
+                if isinstance(data, dict):
+                    d = cargar(); d["ultimo"] = p; guardar(d)
+                    return data, p
+            except Exception as e:
+                if _muerta(e): _CAIDAS.add(p); _pausar(p)
+                print(f"  IA {_explicar(p, e)} Sigo con otra IA o sin IA.")
+        return None, None
+    finally:
+        _TL.hasta = None
 
 def texto(prompt, modo="alternar"):
     """Respuesta en texto plano (para los pilotos). Devuelve '' si ninguna IA responde. Nunca lanza excepciones."""
