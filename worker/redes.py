@@ -1,6 +1,6 @@
 """Publicar el mismo video (con el mismo título y descripción) también en Facebook (Página, como Reel) y en TikTok.
 Se hace como una persona: en el Chrome del worker, en una pestaña aparte que se cierra al terminar, con la sesión que ya iniciaste ahí.
-- Facebook: Meta Business Suite (business.facebook.com) -> compositor de Reels de tu Página.
+- Facebook: facebook.com -> «Foto/vídeo» -> subir el mismo archivo -> título y descripción -> «Publicar».
 - TikTok: TikTok Studio (tiktok.com/tiktokstudio/upload).
 Si algo falla NO se toca la publicación de YouTube: queda el motivo en el video y diagnostico-redes.txt/.png en la carpeta del worker.
 """
@@ -88,43 +88,55 @@ def _abrir(url):
 RX_LOGIN = re.compile(r"iniciar sesi[oó]n|inicia sesi[oó]n|log in|log into|sign in|crear cuenta|create new account|continuar con|continue with", re.I)
 
 
-# ------------------------------------------------------------------ Facebook (Página, Reel)
+# ------------------------------------------------------------------ Facebook (facebook.com -> Foto/vídeo -> Publicar)
+RX_PUBLICAR = r"^(publicar|post|publish|compartir|share)$"
+RX_FB_OK = re.compile(r"se est[aá] publicando|publicando|publicad[oa]|tu (reel|v[ií]deo|publicaci[oó]n) (se|est[aá]|ya)|your (reel|video|post) (is|has been|was)|posting|shared|published", re.I)
+
+
+def _dialogo_fb(tab): return tab.visible("div[role=dialog]")
+
+
 def facebook(ruta, texto, page="", chk=lambda: None, log=print):
-    asset = ""
-    m = re.search(r"(?:asset_id=|profile\.php\?id=|^)(\d{6,})", page or "")
-    if m: asset = m.group(1)
-    elif page: log("  Facebook: para elegir la Página necesito su ID numérico (lo ves en Meta Business Suite); uso la que tengas seleccionada.")
-    url = "https://business.facebook.com/latest/reels_composer" + (f"?asset_id={asset}" if asset else "")
-    tab = _abrir(url); paso = "abrir el compositor de Reels"
+    """Publica desde facebook.com (NO Meta Business Suite): inicio -> 'Foto/vídeo' -> subir el MISMO archivo -> título+descripción -> 'Publicar'."""
+    tab = _abrir("https://www.facebook.com/"); paso = "abrir facebook.com"
     try:
-        for _ in range(20):
+        for _ in range(25):
             chk(); b = _body(tab)
-            if b.strip() and len(b) > 200: break
+            if len(b) > 200: break
             time.sleep(1)
-        if "/login" in tab.url() or ("business.facebook.com" not in tab.url() and RX_LOGIN.search(_body(tab)) and not tab.existe("input[type=file]")):
-            raise RedError("Facebook pide iniciar sesión: entrá a Facebook en el Chrome del worker (botón «Iniciar sesión en Facebook») y reintento en la próxima publicación.")
-        paso = "subir el archivo"
-        fin = time.time() + 90; ok = False
+        if "/login" in tab.url() or (RX_LOGIN.search(_body(tab)) and not _centro_texto(tab, r"^(foto/v[ií]deo|photo/video)$", habilitado=False)):
+            raise RedError("Facebook pide iniciar sesión: entrá a facebook.com en el Chrome del worker (botón «Iniciar sesión en Facebook») y reintento en la próxima publicación.")
+        paso = "tocar «Foto/vídeo»"; fin = time.time() + 40; abierto = False
+        while time.time() < fin and not abierto:
+            chk()
+            if _dialogo_fb(tab): abierto = True; break
+            _clic(tab, r"^(foto/v[ií]deo|photo/video)$", habilitado=False)
+            time.sleep(3)
+            abierto = _dialogo_fb(tab)
+        if not abierto: raise RedError("No pude abrir «Foto/vídeo» en facebook.com (cambió la pantalla o no hay cuadro para publicar).")
+        time.sleep(1.5)
+        paso = "subir el archivo"; ok = False; fin = time.time() + 60
         while time.time() < fin and not ok:
-            chk(); ok = _subir_archivo(tab, ruta, r"agregar video|a[ñn]adir video|add video|subir video|upload video|seleccionar video|select video")
+            chk()
+            if tab.existe("div[role=dialog] input[type=file]"): tab.archivos("div[role=dialog] input[type=file]", [str(ruta)]); ok = True; break
+            ok = _subir_archivo(tab, ruta, r"a[ñn]adir fotos?/v[ií]deos?|agregar fotos?/v[ií]deos?|add photos?/videos?|foto/v[ií]deo")
             if not ok: time.sleep(2)
-        if not ok: raise RedError("No encontré dónde subir el video en el compositor de Reels (¿la cuenta tiene una Página?).")
-        paso = "completar y publicar"; escrito = False; click_pub = False; fin = time.time() + 20 * 60
+        if not ok: raise RedError("No encontré dónde subir el video en el cuadro de Facebook.")
+        paso = "escribir el título y la descripción y publicar"; escrito = False; click_pub = False; fin = time.time() + 20 * 60
         while time.time() < fin:
             chk(); time.sleep(2)
-            if not escrito and tab.visible("div[role=textbox][contenteditable=true]"):
-                tab.escribir("div[role=textbox][contenteditable=true]", texto, 0); escrito = True; time.sleep(1); continue
-            if escrito and _clic(tab, r"^(compartir|publicar|share|publish)$"): click_pub = True; break      # el botón final solo se habilita cuando el video terminó de subir
-            _clic(tab, r"^(siguiente|next|continuar|continue)$")
-        if not click_pub: raise RedError("El video no llegó a quedar listo para publicar en Facebook (tardó más de 20 minutos o cambió la pantalla).")
-        paso = "confirmar la publicación"
-        fin = time.time() + 150
+            _clic(tab, r"^(aceptar|entendido|got it|ok)$")                                   # aviso 'los videos se comparten como reels'
+            if not escrito and tab.visible("div[role=dialog] div[role=textbox][contenteditable=true]"):
+                tab.escribir("div[role=dialog] div[role=textbox][contenteditable=true]", texto, 0); escrito = True; time.sleep(1.5); continue
+            if escrito and _clic(tab, RX_PUBLICAR): click_pub = True; break                 # solo se habilita cuando el video terminó de subir
+            if escrito: _clic(tab, r"^(siguiente|next|continuar|continue)$")
+        if not click_pub: raise RedError("El video no quedó listo para «Publicar» en Facebook (tardó más de 20 minutos o cambió la pantalla).")
+        paso = "confirmar la publicación"; fin = time.time() + 180
         while time.time() < fin:
             chk(); time.sleep(2); b = _body(tab)
             _clic(tab, r"^(publicar ahora|post now|share now|compartir ahora)$")
-            if re.search(r"reel (publicado|compartido|se (public|comparti)[oó])|tu reel (est[aá]|ya)|reel (was )?(published|shared)|your reel (is|has been|was)|publicando tu reel|se est[aá] publicando|sharing your reel", b): return "ok"
-            if not tab.visible("div[role=textbox][contenteditable=true]") and not _centro_texto(tab, r"^(compartir|publicar|share|publish)$", habilitado=False): return "ok"
-        return "enviado"                                  # se tocó Compartir; la página no dio confirmación clara
+            if not _dialogo_fb(tab) or RX_FB_OK.search(b): time.sleep(4); return "ok"        # el cuadro se cerró: ya se publicó
+        return "enviado"
     except Exception as e:
         _diag(tab, "Facebook", paso, e)
         raise

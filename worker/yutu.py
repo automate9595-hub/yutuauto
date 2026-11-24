@@ -1168,10 +1168,26 @@ JS_DLG_TXT = r"""(function(){var a=window.__A('ytcp-video-share-dialog,ytcp-uplo
 for(var i=0;i<a.length;i++){var r=a[i].getBoundingClientRect();if(r.width>0&&r.height>0){var t=a[i].innerText||'';if(t.trim())return t}}return ''})()"""
 RE_VENTANA_FINAL = re.compile(r"se est[aá] procesando|v[ií]deo publicado|se ha publicado|video published|processing|procesamiento|enlace del v", re.I)
 
+JS_CERRAR_DLG = r"""(function(){var d=window.__A('ytcp-video-share-dialog,ytcp-uploads-dialog,tp-yt-paper-dialog,ytcp-dialog');
+for(var i=0;i<d.length;i++){var r=d[i].getBoundingClientRect();if(r.width<=0||r.height<=0)continue;
+var b=d[i].querySelectorAll('#close-button,ytcp-button#close-button,button,ytcp-button,tp-yt-paper-button,[role=button]');
+for(var j=0;j<b.length;j++){var t=(b[j].innerText||b[j].getAttribute('aria-label')||'').trim();var q=b[j].getBoundingClientRect();
+if(q.width>0&&q.height>0&&(b[j].id==='close-button'||/^(cerrar|close)$/i.test(t))){b[j].click();return 1}}}return 0})()"""
+
+def _cerrar_ventana_final(tab, intento):
+    """Cierra 'Se ha publicado el vídeo'. Cada intento usa un método distinto: clic por texto, .click() por JS dentro del cuadro, tecla Esc, botón #close-button."""
+    m = intento % 4
+    try:
+        if m == 0: return bool(tab.clic_texto(r"^(cerrar|close)$", TAGS_BOTON)) or _clic_primero(tab, ["ytcp-video-share-dialog #close-button", "#close-button"])
+        if m == 1: return bool(tab.eval(JS_CERRAR_DLG))
+        if m == 2: tab.tecla("Escape", 27); return True
+        return tab.clic_visible("#close-button", False, True)
+    except Exception: return False
+
 def cerrar_cuando_completo(tab, it, t0, size_mb, chk, limite=1200):
     """Ventana final ('Se está procesando el vídeo' / 'Vídeo publicado'): SOLO cuando el pie dice 'Comprobaciones completadas' toca 'Cerrar'.
     Mientras dice 'Subiéndose' o 'Comprobando' espera (si se cierra antes, YouTube corta la subida)."""
-    fin = time.time() + limite; sin_ventana = 0; ult = None
+    fin = time.time() + limite; sin_ventana = 0; ult = None; intentos = 0
     while time.time() < fin:
         chk()
         try: up_progress(tab, it, t0, size_mb)
@@ -1192,7 +1208,7 @@ def cerrar_cuando_completo(tab, it, t0, size_mb, chk, limite=1200):
             except Exception: pass
             print("  Comprobaciones completadas en la ventana final: toco 'Cerrar'.")
             paso("comprobaciones completadas: cerrando la ventana")
-            if not tab.clic_texto(r"^(cerrar|close)$", TAGS_BOTON): _clic_primero(tab, ["ytcp-video-share-dialog #close-button", "#close-button", "ytcp-button#close-button"])
+            _cerrar_ventana_final(tab, intentos); intentos += 1      # si no se cierra, el siguiente giro prueba OTRO método (clic, JS, Esc...)
             time.sleep(1.5)
             continue                                          # si la ventana ya no está, el siguiente giro devuelve True
         if txt != ult: print("  Ventana final: esperando a que Studio termine de comprobar…"); ult = txt
