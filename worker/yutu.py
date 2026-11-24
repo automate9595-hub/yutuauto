@@ -1,7 +1,7 @@
 """Yutu worker: descarga -> recorte -> efectos -> subtitulos -> subida a YouTube Studio (sin Google Cloud)."""
 import json, math, os, re, shutil, subprocess, sys, time, pathlib, urllib.request, datetime as dt
 import threading, concurrent.futures as cf
-import efectos, ia, voz, cdp, titulos, tiktok, redes, aprendizaje
+import efectos, ia, voz, cdp, titulos, tiktok, redes, aprendizaje, atomico
 ROOT = pathlib.Path(__file__).parent
 MEDIA = ROOT / "media"; MEDIA.mkdir(exist_ok=True)
 QF = ROOT / "queue.json"; CF = ROOT / "cancel.json"
@@ -72,7 +72,7 @@ def load(): return json.loads(QF.read_text("utf-8"))
 _SL = threading.Lock()
 def save(d):
     with _SL:                                   # editar y subir ahora corren a la vez: un solo guardado por vez
-        tmp = QF.with_suffix(".tmp"); tmp.write_text(json.dumps(d, indent=2, ensure_ascii=False), "utf-8"); os.replace(tmp, QF)
+        atomico.escribir(QF, json.dumps(d, indent=2, ensure_ascii=False))
 
 def expand(d):
     out = []
@@ -170,7 +170,7 @@ def seg_libre(vid, mia, a, L, dur, margen=0.5):
 def seg_registrar(vid, mia, a, L):
     with _SGL:
         d = seg_leer(); d.setdefault(vid, {})[mia] = [round(a, 2), round(a + L, 2)]
-        tmp = SEGF.with_suffix(".tmp"); tmp.write_text(json.dumps(d), "utf-8"); os.replace(tmp, SEGF)
+        atomico.escribir(SEGF, json.dumps(d))
 
 def srt_time(s):
     h, m, sec = int(s // 3600), int(s % 3600 // 60), s % 60

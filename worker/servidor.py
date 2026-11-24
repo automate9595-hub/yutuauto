@@ -102,8 +102,7 @@ def queue_items():
     return _LAST_ITEMS
 
 def write_queue(d):
-    qf = ROOT / "queue.json"; tmp = qf.with_suffix(".tmp")
-    tmp.write_text(json.dumps(d, indent=2, ensure_ascii=False), "utf-8"); os.replace(tmp, qf)
+    import atomico; atomico.escribir(ROOT / "queue.json", json.dumps(d, indent=2, ensure_ascii=False))
 
 def read_queue():
     try: return json.loads((ROOT / "queue.json").read_text("utf-8"))

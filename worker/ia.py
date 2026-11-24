@@ -28,7 +28,7 @@ def cargar():
     except Exception: return {}
 
 def guardar(d):
-    tmp = KF.with_suffix(".tmp"); tmp.write_text(json.dumps(d, indent=2), "utf-8"); os.replace(tmp, KF)
+    import atomico; atomico.escribir(KF, json.dumps(d, indent=2))
 
 def estado():
     d = cargar()
