@@ -1164,15 +1164,27 @@ def _detalles(tab, it, titulo, cuerpo, chk):
         tab.captura(ROOT / "aviso-ninos.png"); tab.diagnostico(ROOT / "diagnostico-ninos.txt", "No encontré la opcion de 'para niños'")
     time.sleep(0.6)
 
-JS_DLG_TXT = r"""(function(){var a=window.__A('ytcp-video-share-dialog,ytcp-uploads-dialog,tp-yt-paper-dialog,ytcp-dialog');
-for(var i=0;i<a.length;i++){var r=a[i].getBoundingClientRect();if(r.width>0&&r.height>0){var t=a[i].innerText||'';if(t.trim())return t}}return ''})()"""
+JS_DLG_TXT = r"""(function(){var vis=function(e){var r=e.getBoundingClientRect();return r.width>0&&r.height>0};
+var inDlg=function(e){for(var n=e,i=0;n&&i<14;i++){var g=(n.tagName||'').toLowerCase();if(g.indexOf('dialog')>=0||(n.getAttribute&&n.getAttribute('role')==='dialog'))return n;n=n.parentElement||(n.getRootNode&&n.getRootNode().host)||null}return null};
+var a=window.__A('[role=dialog],ytcp-video-share-dialog,ytcp-uploads-dialog,ytcp-uploads-still-processing-dialog,tp-yt-paper-dialog,ytcp-dialog');
+for(var i=0;i<a.length;i++){if(vis(a[i])){var t=a[i].innerText||'';if(t.trim())return t}}
+var b=window.__A('button,ytcp-button,tp-yt-paper-button,[role=button]');
+for(var j=0;j<b.length;j++){var x=(b[j].innerText||b[j].getAttribute('aria-label')||'').trim();
+if(vis(b[j])&&/^(cerrar|close)$/i.test(x)){var d=inDlg(b[j]);if(d){var t2=d.innerText||'';if(t2.trim())return t2}}}
+return ''})()"""
 RE_VENTANA_FINAL = re.compile(r"se est[aá] procesando|v[ií]deo publicado|se ha publicado|video published|processing|procesamiento|enlace del v", re.I)
 
-JS_CERRAR_DLG = r"""(function(){var d=window.__A('ytcp-video-share-dialog,ytcp-uploads-dialog,tp-yt-paper-dialog,ytcp-dialog');
-for(var i=0;i<d.length;i++){var r=d[i].getBoundingClientRect();if(r.width<=0||r.height<=0)continue;
+JS_CERRAR_DLG = r"""(function(){var vis=function(e){var r=e.getBoundingClientRect();return r.width>0&&r.height>0};
+var inDlg=function(e){for(var n=e,i=0;n&&i<14;i++){var g=(n.tagName||'').toLowerCase();if(g.indexOf('dialog')>=0||(n.getAttribute&&n.getAttribute('role')==='dialog'))return n;n=n.parentElement||(n.getRootNode&&n.getRootNode().host)||null}return null};
+var d=window.__A('[role=dialog],ytcp-video-share-dialog,ytcp-uploads-dialog,ytcp-uploads-still-processing-dialog,tp-yt-paper-dialog,ytcp-dialog');
+for(var i=0;i<d.length;i++){if(!vis(d[i]))continue;
 var b=d[i].querySelectorAll('#close-button,ytcp-button#close-button,button,ytcp-button,tp-yt-paper-button,[role=button]');
-for(var j=0;j<b.length;j++){var t=(b[j].innerText||b[j].getAttribute('aria-label')||'').trim();var q=b[j].getBoundingClientRect();
-if(q.width>0&&q.height>0&&(b[j].id==='close-button'||/^(cerrar|close)$/i.test(t))){b[j].click();return 1}}}return 0})()"""
+for(var j=0;j<b.length;j++){var t=(b[j].innerText||b[j].getAttribute('aria-label')||'').trim();
+if(vis(b[j])&&(b[j].id==='close-button'||/^(cerrar|close)$/i.test(t))){b[j].click();return 1}}}
+var c=window.__A('button,ytcp-button,tp-yt-paper-button,[role=button]');
+for(var k=0;k<c.length;k++){var u=(c[k].innerText||c[k].getAttribute('aria-label')||'').trim();
+if(vis(c[k])&&/^(cerrar|close)$/i.test(u)&&inDlg(c[k])){c[k].click();return 1}}
+return 0})()"""
 
 def _cerrar_ventana_final(tab, intento):
     """Cierra 'Se ha publicado el vídeo'. Cada intento usa un método distinto: clic por texto, .click() por JS dentro del cuadro, tecla Esc, botón #close-button."""
@@ -1531,6 +1543,7 @@ def _subir_item(d, tab, cid, it, cortadas, auto):
         check_cancel(it)
         studio_upload_one(tab, cid, it, d.get("config"), cortadas); print("Subido:", it.get("final_title") or it.get("title"), it.get("publishAt") or "publicado ahora")
         _extras(d, it)
+        _minimizar(tab)                                           # todo publicado (YouTube + redes): Chrome minimizado y se sigue con el próximo video
     except Cancelled:
         it["status"] = "cancelled"; it["stage"] = "Cancelado"; it.pop("publishAt", None)
         print("Cancelado:", it.get("title")); save(d)

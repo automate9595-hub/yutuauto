@@ -4,7 +4,7 @@ Se hace como una persona: en el Chrome del worker, en una pestaña aparte que se
 - TikTok: TikTok Studio (tiktok.com/tiktokstudio/upload).
 Si algo falla NO se toca la publicación de YouTube: queda el motivo en el video y diagnostico-redes.txt/.png en la carpeta del worker.
 """
-import json, pathlib, re, time
+import json, os, pathlib, re, subprocess, time
 
 import cdp
 
@@ -93,7 +93,52 @@ RX_PUBLICAR = r"^(publicar|post|publish|compartir|share)$"
 RX_FB_OK = re.compile(r"se est[aá] publicando|publicando|publicad[oa]|tu (reel|v[ií]deo|publicaci[oó]n) (se|est[aá]|ya)|your (reel|video|post) (is|has been|was)|posting|shared|published", re.I)
 
 
-def _dialogo_fb(tab): return tab.visible("div[role=dialog]")
+RX_FOTOVIDEO = r"^(foto/v[ií]deo|photo/video)$"
+RX_ANADIR = r"a[ñn]adir fotos?/v[ií]deos?|agregar fotos?/v[ií]deos?|add photos?/videos?"
+JS_VIDEO_ADJUNTO = r"""(function(){var a=window.__A('div[role=dialog]');
+if(/\/(post|reel|reels|stories)\/create/i.test(location.pathname))a=[document.body];
+for(var i=0;i<a.length;i++){var r=a[i].getBoundingClientRect();if(r.width<=0||r.height<=0)continue;
+var t=a[i].innerText||'';
+if(a[i].querySelector('video'))return 1;
+if(/\.mp4|subiendo|uploading|procesando|processing|\b\d{1,2}:\d{2}\b/i.test(t))return 1;
+if(a[i].querySelector('div[role=textbox]')&&!/a[ñn]adir fotos?\/v[ií]deos?|arrastr|drag and drop|add photos?\/videos?/i.test(t))return 1}
+return 0})()"""
+
+
+def _entregar(tab, ev, ruta):
+    """Chrome avisó que Facebook quiso abrir el selector de archivos: se le entrega la ruta completa del video (sin ventana de Windows)."""
+    if ev and ev.get("backendNodeId"):
+        tab.call("DOM.setFileInputFiles", {"files": [os.path.abspath(str(ruta))], "backendNodeId": ev["backendNodeId"]}); return True
+    return False
+
+
+def _dialogo_windows(ruta):
+    """Último recurso: si el selector de Windows ('Abrir') quedó abierto, escribe la ruta completa del video en «Nombre» y da Enter."""
+    p = os.path.abspath(str(ruta))
+    esc = "".join("{" + c + "}" if c in "+^%~(){}[]" else c for c in p).replace("'", "''")
+    ps = ("Add-Type -AssemblyName System.Windows.Forms; $w=New-Object -ComObject WScript.Shell; $ok=$false; "
+          "foreach($t in 'Abrir','Open'){ if($w.AppActivate($t)){$ok=$true;break} }; if(-not $ok){exit 2}; Start-Sleep -Milliseconds 800; "
+          "[System.Windows.Forms.SendKeys]::SendWait('" + esc + "'); Start-Sleep -Milliseconds 600; [System.Windows.Forms.SendKeys]::SendWait('{ENTER}')")
+    try:
+        r = subprocess.run(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", ps], stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=30)
+        return r.returncode == 0
+    except Exception: return False
+
+
+RX_URL_CREAR = re.compile(r"/(post|reel|reels|stories)/create|/composer", re.I)
+
+
+def _dialogo_fb(tab):
+    """¿Está abierto el compositor de Facebook? Como cuadro (dialog) o como página completa «Crear reel» (facebook.com/post/create)."""
+    try: u = tab.url() or ""
+    except Exception: u = ""
+    return bool(RX_URL_CREAR.search(u)) or bool(tab.visible("div[role=dialog]"))
+
+
+def _caja_texto_fb(tab):
+    for sel in ("div[role=dialog] div[role=textbox][contenteditable=true]", "div[role=textbox][contenteditable=true]"):
+        if tab.visible(sel): return sel
+    return None
 
 
 def facebook(ruta, texto, page="", chk=lambda: None, log=print):
@@ -106,28 +151,43 @@ def facebook(ruta, texto, page="", chk=lambda: None, log=print):
             time.sleep(1)
         if "/login" in tab.url() or (RX_LOGIN.search(_body(tab)) and not _centro_texto(tab, r"^(foto/v[ií]deo|photo/video)$", habilitado=False)):
             raise RedError("Facebook pide iniciar sesión: entrá a facebook.com en el Chrome del worker (botón «Iniciar sesión en Facebook») y reintento en la próxima publicación.")
-        paso = "tocar «Foto/vídeo»"; fin = time.time() + 40; abierto = False
-        while time.time() < fin and not abierto:
+        paso = "tocar «Foto/vídeo»"
+        try: tab.call("DOM.enable")
+        except Exception: pass
+        tab.call("Page.setInterceptFileChooserDialog", {"enabled": True}); tab.eventos.clear()      # el selector de Windows no se muestra: se le entrega la ruta
+        subido = False; fin = time.time() + 40
+        while time.time() < fin and not subido and not _dialogo_fb(tab):
             chk()
-            if _dialogo_fb(tab): abierto = True; break
-            _clic(tab, r"^(foto/v[ií]deo|photo/video)$", habilitado=False)
-            time.sleep(3)
-            abierto = _dialogo_fb(tab)
-        if not abierto: raise RedError("No pude abrir «Foto/vídeo» en facebook.com (cambió la pantalla o no hay cuadro para publicar).")
+            _clic(tab, RX_FOTOVIDEO, habilitado=False)
+            subido = _entregar(tab, tab.esperar_evento("Page.fileChooserOpened", 4), ruta)         # a veces el propio botón ya abre el selector
+            if not subido: time.sleep(1.5)
+        if not subido and not _dialogo_fb(tab): raise RedError("No pude abrir «Foto/vídeo» en facebook.com (cambió la pantalla o no hay cuadro para publicar).")
         time.sleep(1.5)
-        paso = "subir el archivo"; ok = False; fin = time.time() + 60
-        while time.time() < fin and not ok:
+        paso = "subir el archivo"; fin = time.time() + 60; intentos = 0
+        while not subido and time.time() < fin:
+            chk(); intentos += 1
+            if _clic(tab, RX_ANADIR, habilitado=False):
+                subido = _entregar(tab, tab.esperar_evento("Page.fileChooserOpened", 6), ruta)
+                if not subido and _dialogo_windows(ruta): log("  Facebook: elegí el archivo en la ventana «Abrir» de Windows."); subido = True
+            if not subido and tab.existe("div[role=dialog] input[type=file]"):
+                tab.archivos("div[role=dialog] input[type=file]", [str(ruta)]); subido = True
+            if not subido: time.sleep(2)
+        if not subido: raise RedError("No encontré dónde subir el video en el cuadro de Facebook.")
+        paso = "comprobar que el video se cargó"; fin = time.time() + 90; adj = False
+        while time.time() < fin:
             chk()
-            if tab.existe("div[role=dialog] input[type=file]"): tab.archivos("div[role=dialog] input[type=file]", [str(ruta)]); ok = True; break
-            ok = _subir_archivo(tab, ruta, r"a[ñn]adir fotos?/v[ií]deos?|agregar fotos?/v[ií]deos?|add photos?/videos?|foto/v[ií]deo")
-            if not ok: time.sleep(2)
-        if not ok: raise RedError("No encontré dónde subir el video en el cuadro de Facebook.")
+            if tab.eval(JS_VIDEO_ADJUNTO): adj = True; break
+            time.sleep(2)
+        try: tab.call("Page.setInterceptFileChooserDialog", {"enabled": False})
+        except Exception: pass
+        if not adj: raise RedError("El video no llegó a cargarse en Facebook (el selector de archivos no recibió «" + pathlib.Path(str(ruta)).name + "»).")
         paso = "escribir el título y la descripción y publicar"; escrito = False; click_pub = False; fin = time.time() + 20 * 60
         while time.time() < fin:
             chk(); time.sleep(2)
             _clic(tab, r"^(aceptar|entendido|got it|ok)$")                                   # aviso 'los videos se comparten como reels'
-            if not escrito and tab.visible("div[role=dialog] div[role=textbox][contenteditable=true]"):
-                tab.escribir("div[role=dialog] div[role=textbox][contenteditable=true]", texto, 0); escrito = True; time.sleep(1.5); continue
+            caja = None if escrito else _caja_texto_fb(tab)
+            if caja:
+                tab.escribir(caja, texto, 0); escrito = True; time.sleep(1.5); continue
             if escrito and _clic(tab, RX_PUBLICAR): click_pub = True; break                 # solo se habilita cuando el video terminó de subir
             if escrito: _clic(tab, r"^(siguiente|next|continuar|continue)$")
         if not click_pub: raise RedError("El video no quedó listo para «Publicar» en Facebook (tardó más de 20 minutos o cambió la pantalla).")
