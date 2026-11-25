@@ -30,9 +30,9 @@ def _rango(d):
     return {"dmin": f("dmin"), "dmax": f("dmax")}
 
 # ---- elegir por popularidad: más vistas / likes / comentarios / compartidos / recientes
-RANKINGS = ("auto", "vistas", "likes", "comentarios", "compartidos", "recientes")
-RK_NOM = {"vistas": "más vistas", "likes": "más likes", "comentarios": "más comentarios", "compartidos": "más compartidos", "recientes": "más recientes"}
-RK_CLAVE = {"vistas": "views", "likes": "likes", "comentarios": "comments", "compartidos": "shares", "recientes": "ts"}
+RANKINGS = ("auto", "mejores", "vistas", "likes", "comentarios", "compartidos", "recientes")
+RK_NOM = {"mejores": "mejores", "vistas": "más vistas", "likes": "más likes", "comentarios": "más comentarios", "compartidos": "más compartidos", "recientes": "más recientes"}
+RK_CLAVE = {"mejores": "score", "vistas": "views", "likes": "likes", "comentarios": "comments", "compartidos": "shares", "recientes": "ts"}
 
 def _rank(d, p=None):
     r = d.get("ranking", (p or {}).get("ranking", "auto"))
@@ -60,10 +60,34 @@ def _enriquecer(v, p):
         if x and not v.get(k): v[k] = x
     return v
 
+def ordenar_mejores(p, cand, log=print, n=18):
+    """Los MEJORES: mezcla relevancia con el tema (posición en la búsqueda + palabras del título), visitas y comentarios. Se aplica sobre lo que ya pasó los filtros."""
+    import math, re, concurrent.futures as cf
+    if not cand: return cand
+    pal = re.findall(r"\w{3,}", (p.get("tema") or "").lower())
+    top, vistos = [], set()
+    for v in sorted(cand, key=lambda v: v.get("pos", 99))[:8] + sorted(cand, key=lambda v: -_vistas(v))[:10]:
+        if v["id"] not in vistos: vistos.add(v["id"]); top.append(v)
+    top = top[:n]; faltan = [v for v in top if not v.get("comments")]
+    if faltan:
+        log(f"Buscando los mejores: reviso visitas y comentarios de {len(faltan)} videos…")
+        with cf.ThreadPoolExecutor(4) as ex: list(ex.map(lambda v: _enriquecer(v, p), faltan))
+    N = max(len(cand), 1)
+    mv = max([math.log10(_vistas(v) + 1) for v in top] + [1]); mc = max([math.log10((v.get("comments") or 0) + 1) for v in top] + [1])
+    def sc(v):
+        t = (v.get("title") or v.get("t") or "").lower()
+        coin = (sum(1 for w in pal if w in t) / len(pal)) if pal else 0
+        rel = 0.6 * (1 - min(v.get("pos", N), N) / N) + 0.4 * coin
+        v["score"] = 0.40 * rel + 0.35 * (math.log10(_vistas(v) + 1) / mv) + 0.25 * (math.log10((v.get("comments") or 0) + 1) / mc)
+        return v["score"]
+    top.sort(key=lambda v: -sc(v))
+    return top + [v for v in cand if v["id"] not in vistos]
+
 def ordenar_por(p, cand, log=print, n=10):
     """Ordena los candidatos según p['ranking']. 'auto' = como venían (variados). Si el dato no viene en la lista, se consulta de los n más prometedores."""
     r = p.get("ranking", "auto")
     if r not in RK_CLAVE or not cand: return cand
+    if r == "mejores": return ordenar_mejores(p, cand, log)
     k = RK_CLAVE[r]; cand = sorted(cand, key=lambda v: -_vistas(v))            # lo más visto primero: ahí es más probable que esté lo mejor
     top = cand[:n]; faltan = [v for v in top if not (_vistas(v) if k == "views" else v.get(k))]
     if faltan:
@@ -77,6 +101,7 @@ def ordenar_por(p, cand, log=print, n=10):
 def _etiq_rank(p, v):
     r = p.get("ranking", "auto")
     if r not in RK_CLAVE: return ""
+    if r == "mejores": return f" (mejores: {format(int(_vistas(v)), ',').replace(',', '.')} visitas · {format(int(v.get('comments') or 0), ',').replace(',', '.')} comentarios)"
     k = RK_CLAVE[r]; x = _vistas(v) if k == "views" else v.get(k)
     if not x: return ""
     return f" ({RK_NOM[r]}: {dt.datetime.fromtimestamp(x).strftime('%d/%m/%Y') if k == 'ts' else format(int(x), ',').replace(',', '.')})"
@@ -436,18 +461,22 @@ def tick_ys(items_existentes, log=print):
     falta = gap - (time.time() - h["ultimo"])
     if falta > 0: p["estado"] = f"Día {dia}/{p['dias']}: {h['n']}/{p['por_dia']} hoy · próximo en {int(falta // 60) + 1} min."; guardar_ys(p); return []
     ya = {i.get("id") for i in items_existentes}; tema = p["tema"]; v0 = p.get("variante", 0); pick = None
-    rk = p.get("ranking", "auto") in RK_CLAVE; pool = []
+    if p.get("ranking") not in RK_CLAVE or p.get("ranking") == "auto": p["ranking"] = "mejores"      # Shorts de YouTube: siempre los mejores (relevancia + comentarios + visitas)
+    pool = {}
     for k in range(len(VAR_YS)):
-        try: res = _buscar(VAR_YS[(v0 + k) % len(VAR_YS)].format(t=tema), 40)
+        try: res = _buscar(VAR_YS[(v0 + k) % len(VAR_YS)].format(t=tema), 50)
         except Exception: continue
+        for i, r in enumerate(res): r["pos"] = i
         ok = [r for r in res if r["id"] not in ya and r["id"] not in p["usados"] and (p.get("dmin") or 8) <= (r["dur"] or 0) <= (p.get("dmax") or 180)]
-        if ok and not rk: pick = ok[0]; p["variante"] = (v0 + k + 1) % len(VAR_YS); break
-        if ok:                                              # por popularidad: se juntan varias búsquedas y se elige el mejor de todos
-            pool += [r for r in ok if r["id"] not in {x["id"] for x in pool}]; p["variante"] = (v0 + k + 1) % len(VAR_YS)
-            if k >= 2 and pool: break
-    if rk and pool:
-        for r in pool: r.setdefault("url", "https://www.youtube.com/watch?v=" + r["id"]); r["t"] = r.get("title", "")
-        pick = ordenar_por(p, pool, lambda m: log("Piloto YouTube Shorts: " + m))[0]
+        for r in ok:
+            if r["id"] in pool: pool[r["id"]]["pos"] = min(pool[r["id"]]["pos"], r["pos"])
+            else: pool[r["id"]] = r
+        p["variante"] = (v0 + k + 1) % len(VAR_YS)
+        if k >= 3 and len(pool) >= 10: break                         # varias búsquedas distintas: se elige el mejor de TODAS, no el primero que aparezca
+    if pool:
+        cand = list(pool.values())
+        for r in cand: r.setdefault("url", "https://www.youtube.com/watch?v=" + r["id"]); r["t"] = r.get("title", "")
+        pick = ordenar_por(p, cand, lambda m: log("Piloto YouTube Shorts: " + m))[0]
     if not pick: p["estado"] = "No encontré Shorts nuevos de ese tema; pruebo otra búsqueda en el próximo ciclo."; guardar_ys(p); log("Piloto YouTube Shorts: " + p["estado"]); return []
     p["usados"] = (p["usados"] + [pick["id"]])[-3000:]; h["n"] += 1; h["ultimo"] = time.time()
     p["hist"] = (p.get("hist", []) + [{"id": pick["id"], "t": pick["title"][:80], "d": hoy.isoformat()}])[-200:]

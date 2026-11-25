@@ -87,15 +87,15 @@ def expand(d):
         if it["key"] not in seen: seen.add(it["key"]); res.append(it)
     d["items"] = res
 
-def download(it, src, cb=None):
+def download(it, src, cb=None, h264=False):
     """Descarga con yt-dlp probando varias variantes (Chrome simulado / cookies / simple). Si es TikTok y ninguna sirve,
     baja el archivo con el Chrome del worker. El error que se muestra es el REAL, no un 'returned non-zero'."""
     cb = cb or (lambda f: set_prog(it, "dl", f))
     url = it.get("url") or ""; ultimo = ""
     for var in tiktok.variantes(url):
         cmd = [sys.executable, "-m", "yt_dlp", "--newline", "-N", "4", "--retries", "5", "--fragment-retries", "5", "--no-mtime"] + var + ["--progress-template", "download:[DL] %(progress._percent_str)s",
-               "--ffmpeg-location", FFMPEG, "-f", "bv*[height<=1080][ext=mp4]+ba[ext=m4a]/bv*[height<=1080]+ba/b",
-               "--merge-output-format", "mp4", "--no-playlist", "-o", str(MEDIA / f"{it['id']}.%(ext)s"), url]
+               "--ffmpeg-location", FFMPEG, "-f", ("bv*[height<=1080][vcodec^=avc1]+ba[ext=m4a]/bv*[height<=1080][vcodec^=avc]+ba/" if h264 else "") + "bv*[height<=1080][ext=mp4]+ba[ext=m4a]/bv*[height<=1080]+ba/b",
+               "--merge-output-format", "mp4", "--no-playlist"] + (["--force-overwrites"] if h264 else []) + ["-o", str(MEDIA / f"{it['id']}.%(ext)s"), url]
         p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding="utf-8", errors="replace")
         idx, last, tail = 0, 0.0, []
         for line in p.stdout:
@@ -298,8 +298,11 @@ def build_af(cfg, L):
     if cfg.get("fade"): af += ["afade=t=in:st=0:d=0.5", f"afade=t=out:st={max(L - 0.5, 0):.2f}:d=0.5"]
     return ",".join(af)
 
-def encode(it, src, start, L, vf, af, final):
-    args = [str(FFMPEG), "-loglevel", "error", "-nostats", "-progress", "pipe:1", "-y", "-ss", str(start), "-t", str(L), "-i", src.name, "-vf", vf]
+def encode(it, src, start, L, vf, af, final, tolerante=False):
+    args = [str(FFMPEG), "-loglevel", "error", "-nostats", "-progress", "pipe:1", "-y", "-ss", str(start), "-t", str(L)]
+    if tolerante: args += ["-err_detect", "ignore_err", "-fflags", "+discardcorrupt+genpts"]        # sigue aunque haya cuadros dañados
+    args += ["-i", src.name, "-vf", vf]
+    if tolerante: args += ["-max_error_rate", "1.0"]
     if af: args += ["-af", af]
     args += ["-c:v", "libx264", "-preset", "veryfast", "-threads", "0", "-crf", "22", "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "160k",
              "-movflags", "+faststart", final.name]
@@ -313,6 +316,21 @@ def encode(it, src, start, L, vf, af, final):
         elif "=" not in line: errs.append(line.strip())
     if p.wait() != 0: raise subprocess.CalledProcessError(p.returncode, "ffmpeg", output=" ".join(errs[-3:]))
     set_prog(it, "edit", 1.0, True)
+
+def _encode_resiliente(it, src, start, L, vf, af, final):
+    """Si FFmpeg dice 'Decode error rate ... exceeds maximum' el archivo bajado viene dañado (típico de VP9): se baja de nuevo en H.264 y, si aun así falla, se edita tolerando los cuadros rotos."""
+    try: return encode(it, src, start, L, vf, af, final)
+    except subprocess.CalledProcessError as e:
+        if "decode error" not in str(e.output).lower(): raise
+    print("  El video bajado viene dañado (error de decodificación): lo bajo de nuevo en H.264…")
+    try: src.unlink()
+    except Exception: pass
+    download(it, src, None, True)
+    try: return encode(it, src, start, L, vf, af, final)
+    except subprocess.CalledProcessError as e:
+        if "decode error" not in str(e.output).lower(): raise
+    print("  Sigue con errores: edito tolerando los cuadros dañados.")
+    return encode(it, src, start, L, vf, af, final, True)
 
 def reparto_parejo(dur, L, n):
     """n inicios repartidos parejo a lo largo del video, cada tramo centrado en su porción (sin solaparse si cabe)."""
@@ -448,11 +466,11 @@ def process(it, cfg):
     if not short and not vf.replace("setsar=1", "").strip(",") and not af and start == 0 and L >= dur - 1:
         shutil.copy(src, final); set_prog(it, "edit", 1.0, True)   # completo y sin efectos: no se recodifica
     else:
-        try: encode(it, src, start, L, vf, af, final)
+        try: _encode_resiliente(it, src, start, L, vf, af, final)
         except subprocess.CalledProcessError as e:
             if srt is None: raise RuntimeError("FFmpeg: " + str(e.output)[:200])
             print("  FFmpeg no pudo quemar subtitulos; reintento sin ellos.")
-            encode(it, src, start, L, build_vf(ecfg, short, L, None), af, final)
+            _encode_resiliente(it, src, start, L, build_vf(ecfg, short, L, None), af, final)
     if th_txt:
         th_txt.join(120); r = res_txt.get("r")
         if r: it["ia_title"], it["ia_desc"] = r["titulo"], r["descripcion"]; ayuda.append("título " + r["prov"]); print(f"  [IA {r['prov']}] Título: {r['titulo']}")

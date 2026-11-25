@@ -297,8 +297,8 @@ cadaCtl("pia",pi,piSave);cadaCtl("fb",fbo,fbSave);
 /* elegir por popularidad: más vistas / likes / comentarios / compartidos / recientes */
 function rankCtl(secId,obj,saveFn){const cfgDiv=document.querySelector("#"+secId+" .cfg");if(!cfgDiv)return;
 const lab=document.createElement("label");lab.className="wide";
-lab.innerHTML='Elegir los videos por<select><option value="auto">Automático (variados)</option><option value="vistas">👁 Más vistas</option><option value="likes">👍 Más likes</option><option value="comentarios">💬 Más comentarios</option><option value="compartidos">🔁 Más compartidos</option><option value="recientes">🆕 Más recientes</option></select><small class="sub">Toma siempre el mejor que todavía no se usó. Para likes, comentarios y compartidos consulta los datos de los mejores candidatos (tarda unos segundos más).</small>';
-cfgDiv.appendChild(lab);const sel=lab.querySelector("select");sel.value=obj.ranking||"auto";sel.onchange=()=>{obj.ranking=sel.value;saveFn()}}
+lab.innerHTML='Elegir los videos por<select><option value="mejores">⭐ Los mejores (relevancia, comentarios y visitas)</option><option value="auto">Automático (variados)</option><option value="vistas">👁 Más vistas</option><option value="likes">👍 Más likes</option><option value="comentarios">💬 Más comentarios</option><option value="compartidos">🔁 Más compartidos</option><option value="recientes">🆕 Más recientes</option></select><small class="sub">Toma siempre el mejor que todavía no se usó. Para likes, comentarios y compartidos consulta los datos de los mejores candidatos (tarda unos segundos más).</small>';
+cfgDiv.appendChild(lab);const sel=lab.querySelector("select");sel.value=obj.ranking||(secId==="yts"?"mejores":"auto");sel.onchange=()=>{obj.ranking=sel.value;saveFn()}}
 rankCtl("yts",ys,ysSave);rankCtl("tiktok",tt,()=>{try{localStorage.setItem(TT_K,JSON.stringify(tt))}catch{}});rankCtl("tema-tt",tm,()=>{try{localStorage.setItem(TM_K,JSON.stringify(tm))}catch{}});rankCtl("fb",fbo,fbSave);
 
 /* ---------- pestañas ---------- */
