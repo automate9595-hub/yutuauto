@@ -37,8 +37,13 @@ def idioma(lang, titulo=""):
     pista = (base + (f" Tema del video: {t}." if t else "")).strip()
     return codigo, pista
 
+def descargar():
+    """Suelta de la RAM los modelos locales (Whisper/Vosk); se vuelven a cargar solo si hacen falta."""
+    try: _WM.clear(); _VM.clear()
+    except Exception: pass
+
 def pcm(ffmpeg, src, start, length):
-    r = subprocess.run([str(ffmpeg), "-loglevel", "error", "-ss", str(start), "-t", str(length), "-i", str(src),
+    r = subprocess.run([str(ffmpeg), "-loglevel", "error", "-err_detect", "ignore_err", "-ss", str(start), "-t", str(length), "-i", str(src),
                         "-vn", "-ac", "1", "-ar", "16000", "-f", "s16le", "-"], capture_output=True, check=True)
     return r.stdout
 
@@ -78,7 +83,7 @@ def _post_groq(modelo, datos, codigo, pista, clave, url="https://api.groq.com/op
             raise RuntimeError("Groq sin conexión: " + str(e.reason)[:80])
 
 def _flac(ffmpeg, src, a, dur, destino):
-    subprocess.run([str(ffmpeg), "-loglevel", "error", "-y", "-ss", str(a), "-t", str(dur), "-i", str(src),
+    subprocess.run([str(ffmpeg), "-loglevel", "error", "-y", "-err_detect", "ignore_err", "-ss", str(a), "-t", str(dur), "-i", str(src),
                     "-vn", "-ac", "1", "-ar", "16000", "-c:a", "flac", str(destino)], check=True)
 
 def _norm(t): return re.sub(r"[\W_]+", "", str(t).lower())

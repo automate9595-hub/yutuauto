@@ -41,10 +41,12 @@ openStep(Math.min(9,Math.max(1,+load(STEP_K,1)||1)),false);
 const L={lang:{"es-latino":"Español latino",es:"Español",en:"Inglés",auto:"Detectar idioma"},
 stt:{auto:"Automático (Groq large-v3 → PC)",groq_v3:"Groq large-v3",groq_turbo:"Groq large-v3-turbo",local:"En tu PC",vosk:"Vosk"},
 ia:{alternar:"alternando",groq_primero:"Groq primero",gemini_primero:"Gemini primero",claude_primero:"Claude primero",solo_gemini:"solo Gemini",solo_groq:"solo Groq",solo_claude:"solo Claude",apagado:"apagada"}};
+var DSTP="yt";
 let W={worker:false,yt:false,running:false,items:[]};
 function sums(){const sh=q.filter(x=>x.kind==="short").length;
 const set=(n,t,ok)=>{$("sum-"+n).textContent=t;const s=steps.find(x=>+x.dataset.n===n);if(s)s.classList.toggle("done",!!ok)};
-set(1,W.worker?(W.yt?"Worker y canal conectados":"Worker conectado · falta conectar el canal"):"Worker apagado: ejecutá 2-INSTALAR-Y-EJECUTAR.bat",W.worker&&W.yt);
+const sY=DSTP==="yt",oD=({fb:"Facebook",tt:"TikTok"})[DSTP]||"";
+set(1,W.worker?(sY?(W.yt?"Worker y canal conectados":"Worker conectado · falta conectar el canal"):"Worker conectado · subís a "+oD+" (no hace falta YouTube)"):"Worker apagado: ejecutá 2-INSTALAR-Y-EJECUTAR.bat",W.worker&&(!sY||W.yt));
 set(2,q.length?`${q.length} en cola · ${sh} Shorts · ${q.length-sh} videos`:"Pegá los links",q.length>0);
 set(3,cfg.sub?`${L.lang[cfg.lang]||cfg.lang} · ${L.stt[cfg.stt]||cfg.stt}`:"Sin subtítulos",true);
 $("g-voz").textContent=cfg.sub?(L.stt[cfg.stt]||""):"";$("g-asp").textContent=({bottom:"abajo",middle:"centro",top:"arriba"})[cfg.sub_pos]+" · "+({s:"pequeño",m:"mediano",l:"grande"})[cfg.sub_size];
@@ -128,10 +130,10 @@ async function poll(){
 if(!document.hidden){const s=await call("/status");
 if(!s){W.fallos=(W.fallos||0)+1;if(W.fallos<3){setTimeout(poll,2500);return}W.worker=false;W.yt=false;W.running=false;setPill("p-worker","","Worker apagado");setPill("p-yt","","Canal sin conectar");setBusy(false);$("dock-msg").textContent="Worker apagado: ejecutá 2-INSTALAR-Y-EJECUTAR.bat"}
 else{W.fallos=0;W.worker=true;W.yt=!!s.youtube;W.running=s.running;setPill("p-worker","ok","Worker conectado");
-setPill("p-yt",s.youtube?"ok":"",s.youtube?"Canal conectado":"Canal sin conectar");
-$("yt-detail").textContent=s.youtube?"":(s.detail||"");pubRender(s.items||[]);cdSet(s.proximos||[],s.ahora);if(s.ia)iaTxt(s.ia);$("log").textContent=s.log.length?s.log.join("\n"):"Sin actividad todavía.";$("log").scrollTop=1e9;setBusy(s.running);
+setPill("p-yt",s.youtube?"ok":"",s.youtube?"Canal conectado":"Canal sin conectar");$("p-yt").style.display=DSTP==="yt"?"":"none";
+$("yt-detail").textContent=(s.youtube||DSTP!=="yt")?"":(s.detail||"");pubRender(s.items||[]);cdSet(s.proximos||[],s.ahora);if(s.ia)iaTxt(s.ia);$("log").textContent=s.log.length?s.log.join("\n"):"Sin actividad todavía.";$("log").scrollTop=1e9;setBusy(s.running);
 const act=(s.items||[]).find(i=>["processing","uploading"].includes(i.status));
-$("dock-msg").textContent=s.running?(act?`${act.stage||"Procesando"} · ${Math.round(act.pct||0)} %${act.title?" · "+act.title:""}`:"Procesando…"):(s.youtube?"Listo para procesar":"Falta conectar el canal (paso 1)")}
+$("dock-msg").textContent=s.running?(act?`${act.stage||"Procesando"} · ${Math.round(act.pct||0)} %${act.title?" · "+act.title:""}`:"Procesando…"):((s.youtube||DSTP!=="yt")?"Listo para procesar":"Falta conectar el canal (paso 1)")}
 sums()}
 setTimeout(poll,W.running?1500:6000)}
 const note=(t,err)=>{const m=$("ctl-msg");m.textContent=t;m.className="msg"+(err?" err":"")};
@@ -238,7 +240,8 @@ apLoad();
 const DST={plataforma:"yt",fb_page:""};let dstOk=false;const DST_N={yt:"YouTube",fb:"Facebook",tt:"TikTok"};
 function dstDraw(){["yt","fb","tt"].forEach(k=>{$("dest-"+k).checked=DST.plataforma===k;$("dd-"+k).classList.toggle("on",DST.plataforma===k)});
 $("dfb-login").parentElement.style.display=DST.plataforma==="fb"?"":"none";$("dtt-login").parentElement.style.display=DST.plataforma==="tt"?"":"none";
-const sm=$("sum-7");if(sm)sm.dataset.d=DST_N[DST.plataforma]}
+const sm=$("sum-7");if(sm)sm.dataset.d=DST_N[DST.plataforma];
+DSTP=DST.plataforma;const yb=$("yt-block"),sk=$("yt-skip"),pe=$("p-yt"),yes=DST.plataforma==="yt";if(yb)yb.style.display=yes?"":"none";if(sk){sk.style.display=yes?"none":"";$("yt-skip-n").textContent=DST_N[DST.plataforma]}if(pe)pe.style.display=yes?"":"none";const yn=$("yt-need");if(yn)yn.style.display=yes?"":"none";sums()}
 async function dstSave(){const m=$("dest-msg");const r=await call("/destinos",DST,8000);m.className="sub"+(r&&r.ok?"":" err");m.textContent=r?(r.ok?"Guardado: todos los videos se subirán solo a "+DST_N[DST.plataforma]+".":r.message):"No encuentro el worker. Ejecutá 2-INSTALAR-Y-EJECUTAR.bat."}
 ["yt","fb","tt"].forEach(k=>{$("dest-"+k).onchange=e=>{if(e.target.checked){DST.plataforma=k;dstDraw();dstSave()}}});
 async function dstLoad(){if(dstOk)return;const s=await call("/status");if(s&&s.destinos){Object.assign(DST,s.destinos);dstOk=true;dstDraw()}}
@@ -372,11 +375,3 @@ const est=[...document.querySelectorAll("#win-body [data-e]")].filter(x=>x.check
 const r=await call("/limpiar",{estados:est,archivos:$("cl-arch").checked,rastros:$("cl-rast").checked,pilotos:$("cl-pil").checked},60000);
 if($("cl-web").checked){q=[];save();render()}
 m.className="msg"+(!r||!r.ok?" err":"");m.textContent=r?r.message:"No encuentro el worker. Ejecutá 2-INSTALAR-Y-EJECUTAR.bat.";poll()}};
-
-/* tema claro / oscuro (arriba a la derecha) */
-(function(){const R=document.documentElement,B=document.querySelectorAll("[data-theme-set]");
-function aplicar(t,guardar){R.setAttribute("data-theme",t);B.forEach(b=>{const on=b.dataset.themeSet===t;b.classList.toggle("on",on);b.setAttribute("aria-pressed",on)});
-const m=document.querySelector("meta[name=theme-color]");if(m)m.setAttribute("content",t==="light"?"#f3f6fb":"#070b14");
-if(guardar){try{localStorage.setItem("yutu_tema",t)}catch{}}}
-B.forEach(b=>b.addEventListener("click",()=>aplicar(b.dataset.themeSet,true)));
-aplicar(R.getAttribute("data-theme")==="light"?"light":"dark",false)})();

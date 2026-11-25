@@ -1,5 +1,5 @@
 """Servidor local: conecta la web con el worker (solo 127.0.0.1)."""
-import re, ia, piloto, generador, tiktok, redes, aprendizaje, json, os, pathlib, socket, subprocess, sys, threading, time, urllib.request, facebook
+import re, memoria, ia, piloto, generador, tiktok, redes, aprendizaje, json, os, pathlib, socket, subprocess, sys, threading, time, urllib.request, facebook
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 ROOT = pathlib.Path(__file__).parent
 MEDIA = ROOT / "media"
@@ -70,7 +70,9 @@ def launch_chrome(traer=False):
     p = chrome_path()
     if not p: return False
     subprocess.Popen([p, "--remote-debugging-port=9222", f"--user-data-dir={ROOT / 'chrome-perfil'}", "--no-first-run",
-                      "--no-default-browser-check", "https://studio.youtube.com"])
+                      "--no-default-browser-check", "--disable-extensions", "--disable-background-networking", "--disable-sync", "--mute-audio",
+                      "--disk-cache-size=1", "--media-cache-size=1", "--renderer-process-limit=2", "--js-flags=--max-old-space-size=384",
+                      "https://studio.youtube.com"])
     for _ in range(30):
         if port_open(): return True
         time.sleep(0.5)
@@ -178,6 +180,8 @@ def _seguir(pos, proc=None):
 
 def _fin_job():
     state["running"] = False; log("== Proceso terminado ==")
+    try: memoria.liberar(True)
+    except Exception: pass
     try: (ROOT / "cancel.json").unlink()
     except Exception: pass
     try: NOTIFY("Yutu Worker", "Proceso terminado. Revisa el panel.")
@@ -271,6 +275,7 @@ def limpiar(o):
                 if f.is_file() and not any(f.name.startswith(x) for x in ids): mb += f.stat().st_size / 1048576; f.unlink(); n_arch += 1
             except Exception: pass
     pil = piloto.limpiar_memoria() if o.get("pilotos") else 0
+    if not resto and piloto.reiniciar_temporizador(): kick()               # lista vacía: el temporizador arranca de nuevo enseguida
     if o.get("rastros"):
         try: tiktok.bg_cerrar(); time.sleep(1)
         except Exception: pass
@@ -500,6 +505,9 @@ def _piloto_tick():
     if not any(x.get("activo") for x in todos): return
     d = read_queue() or {"config": next((x.get("config") for x in todos if x.get("config")), {}), "items": []}
     if piloto.en_curso_global(d.get("items", [])): return
+    if not d.get("items") and not state["running"] and piloto.reiniciar_temporizador():       # sin videos en la lista: la cuenta regresiva vuelve a cero
+        log("Lista vacía: reinicié la cuenta regresiva para arrancar enseguida.")
+        pa, pt, pm, pg, py, pf = piloto.leer(), piloto.leer_tt(), piloto.leer_tm(), generador.leer(), piloto.leer_ys(), piloto.leer_fb()
     pilotos = [("pa", pa, piloto.tick, "Piloto"), ("tt", pt, piloto.tick_tt, "Piloto TikTok"), ("tm", pm, piloto.tick_tm, "Piloto TikTok tema"),
                ("ys", py, piloto.tick_ys, "Piloto YouTube Shorts"), ("fb", pf, piloto.tick_fb, "Piloto Facebook"), ("ia", pg, generador.tick, "Piloto IA")]
     turno = sorted([x for x in pilotos if x[1].get("activo")], key=lambda x: ((x[1].get("hoy") or {}).get("ultimo") or 0))     # el que más lleva sin publicar, primero
@@ -530,6 +538,8 @@ def vigilante():
     while True:
         time.sleep(60)
         try: tiktok.bg_reposo(180)
+        except Exception: pass
+        try: memoria.liberar(False)
         except Exception: pass
         try:
             if not state["running"]: _piloto_tick()

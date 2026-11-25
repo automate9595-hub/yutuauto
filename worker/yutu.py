@@ -119,7 +119,8 @@ def download(it, src, cb=None, h264=False):
     raise RuntimeError("No se pudo descargar: " + ultimo[:300])
 
 PRE_INFO, DLP, PRE_PEND = {}, {}, set()
-PRE_SEM = threading.Semaphore(2)        # como mucho 2 videos descargados por adelantado
+import memoria
+PRE_SEM = threading.Semaphore(1 if memoria.poca_ram() else 2)        # PC con poca RAM: 1 descarga por adelantado; si no, 2
 _REL = set()
 
 def info_video(it):
@@ -298,14 +299,22 @@ def build_af(cfg, L):
     if cfg.get("fade"): af += ["afade=t=in:st=0:d=0.5", f"afade=t=out:st={max(L - 0.5, 0):.2f}:d=0.5"]
     return ",".join(af)
 
-def encode(it, src, start, L, vf, af, final, tolerante=False):
+def encode(it, src, start, L, vf, af, final, tolerante=False, audio=None):
+    """audio: None = el del video; Path = audio rescatado aparte; "" = sin audio."""
+    memoria.esperar(300, 40)
+    hilos = str(min(os.cpu_count() or 2, 2))                                   # pocos hilos = menos RAM (PC de 2 GB)
     args = [str(FFMPEG), "-loglevel", "error", "-nostats", "-progress", "pipe:1", "-y", "-ss", str(start), "-t", str(L)]
-    if tolerante: args += ["-err_detect", "ignore_err", "-fflags", "+discardcorrupt+genpts"]        # sigue aunque haya cuadros dañados
-    args += ["-i", src.name, "-vf", vf]
+    if tolerante: args += ["-err_detect", "ignore_err", "-fflags", "+discardcorrupt+genpts"]        # sigue aunque haya cuadros o audio dañados
+    args += ["-i", src.name]
+    if isinstance(audio, pathlib.Path): args += ["-i", audio.name]
+    args += ["-vf", vf]
     if tolerante: args += ["-max_error_rate", "1.0"]
-    if af: args += ["-af", af]
-    args += ["-c:v", "libx264", "-preset", "veryfast", "-threads", "0", "-crf", "22", "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "160k",
-             "-movflags", "+faststart", final.name]
+    if isinstance(audio, pathlib.Path): args += ["-map", "0:v:0", "-map", "1:a:0"]
+    if audio == "": args += ["-an"]
+    elif af: args += ["-af", af]
+    args += ["-c:v", "libx264", "-preset", "veryfast", "-threads", hilos, "-crf", "22", "-pix_fmt", "yuv420p"]
+    if audio != "": args += ["-c:a", "aac", "-b:a", "160k"]
+    args += ["-movflags", "+faststart", final.name]
     p = subprocess.Popen(args, cwd=MEDIA, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding="utf-8", errors="replace")
     errs = []
     for line in p.stdout:
@@ -317,20 +326,48 @@ def encode(it, src, start, L, vf, af, final, tolerante=False):
     if p.wait() != 0: raise subprocess.CalledProcessError(p.returncode, "ffmpeg", output=" ".join(errs[-3:]))
     set_prog(it, "edit", 1.0, True)
 
-def _encode_resiliente(it, src, start, L, vf, af, final):
-    """Si FFmpeg dice 'Decode error rate ... exceeds maximum' el archivo bajado viene dañado (típico de VP9): se baja de nuevo en H.264 y, si aun así falla, se edita tolerando los cuadros rotos."""
-    try: return encode(it, src, start, L, vf, af, final)
-    except subprocess.CalledProcessError as e:
-        if "decode error" not in str(e.output).lower(): raise
-    print("  El video bajado viene dañado (error de decodificación): lo bajo de nuevo en H.264…")
-    try: src.unlink()
+def _falla_de_archivo(e):
+    """True si FFmpeg falló por el archivo (audio AAC / cuadros dañados, descarga cortada...). False si fue por subtítulos, filtros o disco."""
+    return not re.search(r"subtitle|libass|fontconfig|filtergraph|no such filter|no such file|permission denied|no space left", str(e.output or ""), re.I)
+
+def _audio_rescate(src, start, L):
+    """Saca el audio aparte ignorando lo dañado. Devuelve el .wav o None."""
+    wav = MEDIA / (src.stem + "_rescate.wav")
+    try:
+        subprocess.run([str(FFMPEG), "-loglevel", "error", "-y", "-err_detect", "ignore_err", "-ss", str(start), "-t", str(L), "-i", src.name,
+                        "-vn", "-ac", "2", "-ar", "44100", "-c:a", "pcm_s16le", wav.name], cwd=MEDIA, capture_output=True, timeout=600)
     except Exception: pass
-    download(it, src, None, True)
+    return wav if wav.exists() and wav.stat().st_size > 4096 else None
+
+def _encode_resiliente(it, src, start, L, vf, af, final):
+    """El video SIEMPRE termina de editarse: si FFmpeg tropieza con el archivo (error de decodificación, audio AAC dañado...) escala solo:
+    1) edita saltando lo dañado, 2) baja el video de nuevo limpio, 3) rescata el audio aparte, 4) como último recurso, sin audio."""
     try: return encode(it, src, start, L, vf, af, final)
     except subprocess.CalledProcessError as e:
-        if "decode error" not in str(e.output).lower(): raise
-    print("  Sigue con errores: edito tolerando los cuadros dañados.")
-    return encode(it, src, start, L, vf, af, final, True)
+        if not _falla_de_archivo(e): raise
+    print("  FFmpeg tropezó con el archivo: lo edito saltando lo dañado…")
+    try: return encode(it, src, start, L, vf, af, final, True)
+    except subprocess.CalledProcessError as e:
+        if not _falla_de_archivo(e): raise
+    print("  Sigue fallando: bajo el video de nuevo, limpio (H.264)…")
+    bak = src.with_suffix(".bak")
+    try: src.replace(bak)
+    except Exception: bak = None
+    try:
+        download(it, src, None, True)
+        if bak: bak.unlink(missing_ok=True)
+    except Cancelled: raise
+    except Exception as e:
+        print("  No pude bajarlo de nuevo:", str(e)[:120])
+        if bak and bak.exists(): bak.replace(src)
+    try: return encode(it, src, start, L, vf, af, final, True)
+    except subprocess.CalledProcessError as e:
+        if not _falla_de_archivo(e): raise
+    print("  Rescato el audio por separado…")
+    wav = _audio_rescate(src, start, L)
+    try: return encode(it, src, start, L, vf, af, final, True, wav if wav else "")
+    finally:
+        if wav: wav.unlink(missing_ok=True)
 
 def reparto_parejo(dur, L, n):
     """n inicios repartidos parejo a lo largo del video, cada tramo centrado en su porción (sin solaparse si cabe)."""
@@ -1677,6 +1714,7 @@ def main():
                 it["status"] = "error"; it["stage"] = "Error"; it["error"] = str(e)[:400]; print("ERROR:", e)
             if it.get("id") and it["id"] not in _REL: _REL.add(it["id"]); PRE_SEM.release()
             save(d)
+            PRE_INFO.pop(it.get("id"), None); DLP.pop(it.get("id"), None); memoria.liberar(True)      # suelta RAM entre video y video
     hilo = threading.Thread(target=productor, daemon=True); hilo.start()
     if NO_UPLOAD:
         hilo.join(); write_plan([i for i in d["items"] if i["status"] == "ready"])

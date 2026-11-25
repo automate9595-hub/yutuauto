@@ -126,6 +126,19 @@ def limpiar_memoria():
         except Exception: pass
     return n
 
+def reiniciar_temporizador():
+    """Cola vacía: pone en cero el 'último video' de cada piloto para que el siguiente arranque YA, sin esperar el intervalo. Conserva el cupo de hoy."""
+    n = 0
+    for f in (PF, TF, PTF, YF, FF, ROOT / "piloto-ia.json"):
+        try: d = json.loads(f.read_text("utf-8"))
+        except Exception: continue
+        h = d.get("hoy")
+        if isinstance(h, dict) and h.get("ultimo"):
+            h["ultimo"] = 0; d["hoy"] = h
+            try: f.write_text(json.dumps(d, indent=2, ensure_ascii=False), "utf-8"); n += 1
+            except Exception: pass
+    return n
+
 def en_rango(p, v):
     """¿La duración del video está entre el mínimo y el máximo del piloto? (si no se conoce, se consulta; si no se puede, pasa)"""
     lo, hi = int(p.get("dmin") or 0), int(p.get("dmax") or 0)
@@ -513,7 +526,7 @@ def proximos(piltos, items=None):
         hecho = (h.get("short", 0) + h.get("video", 0)) if clave in ("pa", "tm", "fb") else h.get("n", 0)
         tope = ((p.get("shorts") or 0) + (p.get("videos") or 0)) if clave in ("pa", "tm", "fb") else (p.get("shorts") if clave == "ia" else p.get("por_dia")) or 0
         gap = gap_de(clave, p)
-        out.append({"clave": clave, "nombre": nombre, "gap": gap, "proximo": (h.get("ultimo") or 0) + gap if h.get("ultimo") else 0, "cupo": bool(tope and hecho >= tope),
+        out.append({"clave": clave, "nombre": nombre, "gap": gap, "proximo": (h.get("ultimo") or 0) + gap if (h.get("ultimo") and items) else 0, "cupo": bool(tope and hecho >= tope),
                     "hecho": hecho, "tope": tope, "enCurso": en_curso(items, clave),
                     "turno": bool(en_curso_global(items)) and not en_curso(items, clave)})
     return out
