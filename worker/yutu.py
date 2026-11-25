@@ -1240,6 +1240,9 @@ def cerrar_cuando_completo(tab, it, t0, size_mb, chk, limite=1200):
             paso("comprobaciones completadas: cerrando la ventana")
             _cerrar_ventana_final(tab, intentos); intentos += 1      # si no se cierra, el siguiente giro prueba OTRO método (clic, JS, Esc...)
             time.sleep(1.5)
+            if intentos >= 6:                                         # no hay forma de cerrarla: el video YA está publicado; se minimiza Chrome y se sigue
+                print("  La ventana final no se cerró: minimizo Chrome y paso al siguiente video.")
+                _minimizar(tab); return True
             continue                                          # si la ventana ya no está, el siguiente giro devuelve True
         if txt != ult: print("  Ventana final: esperando a que Studio termine de comprobar…"); ult = txt
         paso("ventana final abierta: espero 'Comprobaciones completadas' para cerrar")
@@ -1592,12 +1595,12 @@ def _publicar_solo_en(d, it, plat):
             it["status"] = "published"; it["pct"] = 100; it["stage"] = f"Publicado en {nombre}"; it["fin_t"] = time.time(); it.pop("est", None); _fin_piloto(it)
             print("Publicado en", nombre + ":", it.get("final_title") or it.get("title"))
         else:
-            it["status"] = "ready"; it["pct"] = 100; it["stage"] = "Listo"; it["error"] = f"No se pudo publicar en {nombre}: {r.get('msg') or 'sin detalle'}"[:220]
+            it["status"] = "ready"; it["pct"] = 100; it["stage"] = "Listo"; it["error"] = f"No se pudo publicar en {nombre}: {r.get('msg') or 'sin detalle'}"[:220]; it["fin_t"] = time.time(); _fin_piloto(it)
             print("No se pudo publicar en", nombre + ":", it.get("title"), "->", r.get("msg"))
     except Cancelled:
         it["status"] = "cancelled"; it["stage"] = "Cancelado"; print("Cancelado:", it.get("title"))
     except Exception as e:
-        it["status"] = "ready"; it["pct"] = 100; it["stage"] = "Listo"; it["error"] = f"No se pudo publicar en {nombre}: {str(e)[:150]}"
+        it["status"] = "ready"; it["pct"] = 100; it["stage"] = "Listo"; it["error"] = f"No se pudo publicar en {nombre}: {str(e)[:150]}"; it["fin_t"] = time.time(); _fin_piloto(it)
         print("No se pudo publicar en", nombre + ":", it.get("title"), "->", e)
     save(d)
 

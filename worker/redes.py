@@ -100,7 +100,8 @@ RX_LOGIN = re.compile(r"iniciar sesi[oó]n|inicia sesi[oó]n|log in|log into|sig
 
 # ------------------------------------------------------------------ Facebook (facebook.com -> Foto/vídeo -> Publicar)
 RX_PUBLICAR = r"^(publicar|post|publish|compartir|share)$"
-RX_FB_OK = re.compile(r"se est[aá] publicando|publicando|publicad[oa]|tu (reel|v[ií]deo|publicaci[oó]n) (se|est[aá]|ya)|your (reel|video|post) (is|has been|was)|posting|shared|published", re.I)
+RX_FB_TRABAJANDO = re.compile(r"\bpublicando\b|subiendo|\buploading\b|\bposting\b", re.I)        # círculos «Publicando» / «Subiendo 0 %»: todavía no terminó
+RX_FB_AVISO = re.compile(r"se est[aá] procesando tu (publicaci[oó]n|reel|v[ií]deo)|te avisaremos cuando|we.ll let you know|is being processed", re.I)   # cartel final: ya terminó
 
 
 RX_FOTOVIDEO = r"^(foto/v[ií]deo|photo/video)$"
@@ -155,6 +156,8 @@ def facebook(ruta, texto, page="", chk=lambda: None, log=print):
     """Publica desde facebook.com (NO Meta Business Suite): inicio -> 'Foto/vídeo' -> subir el MISMO archivo -> título+descripción -> 'Publicar'."""
     tab = _abrir("https://www.facebook.com/"); paso = "abrir facebook.com"
     try:
+        try: tab.ventana("normal")                                 # el ciclo anterior minimizó Chrome: se restaura para que Facebook cargue y responda bien
+        except Exception: pass
         for _ in range(25):
             chk(); b = _body(tab)
             if len(b) > 200: break
@@ -201,11 +204,16 @@ def facebook(ruta, texto, page="", chk=lambda: None, log=print):
             if escrito and _clic(tab, RX_PUBLICAR): click_pub = True; break                 # solo se habilita cuando el video terminó de subir
             if escrito: _clic(tab, r"^(siguiente|next|continuar|continue)$")
         if not click_pub: raise RedError("El video no quedó listo para «Publicar» en Facebook (tardó más de 20 minutos o cambió la pantalla).")
-        paso = "confirmar la publicación"; fin = time.time() + 180
-        while time.time() < fin:
-            chk(); time.sleep(2); b = _body(tab)
+        paso = "esperar a que Facebook termine de publicar"; t0 = time.time(); visto_aviso = False
+        log("  Facebook: tocó «Publicar»; espero a que terminen «Publicando» y «Subiendo» (hasta 15 min)…")
+        while time.time() - t0 < 15 * 60:
+            chk(); time.sleep(2); b = _body(tab); seg = time.time() - t0
             _clic(tab, r"^(publicar ahora|post now|share now|compartir ahora)$")
-            if not _dialogo_fb(tab) or RX_FB_OK.search(b): time.sleep(4); return "ok"        # el cuadro se cerró: ya se publicó
+            trabajando = bool(RX_FB_TRABAJANDO.search(b))
+            if RX_FB_AVISO.search(b): visto_aviso = True
+            if visto_aviso and not trabajando: time.sleep(5); return "ok"                  # apareció «Se está procesando tu publicación»: terminó
+            if seg >= 20 and not trabajando and not _dialogo_fb(tab): time.sleep(5); return "ok"   # la ventana se cerró sola y ya no hay nada subiendo
+            if seg >= 120 and not trabajando and visto_aviso is False and not _caja_texto_fb(tab): time.sleep(5); return "ok"
         return "enviado"
     except Exception as e:
         _diag(tab, "Facebook", paso, e)
