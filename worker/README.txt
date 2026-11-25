@@ -11,7 +11,7 @@ NOVEDADES v27
 - Las lecciones quedan en aprendizaje.json (carpeta del worker).
 
 NOVEDADES v26
-- NUEVO panel «📤 Dónde se publican los videos» (paso 7 · Publicación): YouTube siempre, y si querés también tu Página de Facebook (Reel) y TikTok, con el MISMO título y descripción.
+- Paso 7 · Publicación «📤 ¿A qué plataforma se suben los videos?»: se elige UNA sola (YouTube, Facebook o TikTok) y todos los videos se suben únicamente ahí, con su título y descripción.
   Funciona con los pilotos y con la cola manual. Se publica en Facebook/TikTok apenas termina la subida a YouTube (no usan la programación).
   Se hace en el Chrome del worker (misma sesión que ya iniciaste), en una pestaña aparte que se cierra sola: Facebook por Meta Business Suite, TikTok por TikTok Studio.
   Si Facebook/TikTok pide iniciar sesión o cambió su pantalla, el video de YouTube NO se toca ni se repite: en la tarjeta del video queda «⚠ TikTok: motivo», y en la carpeta del worker se guardan diagnostico-redes.txt / .png.

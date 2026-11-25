@@ -235,14 +235,12 @@ o.textContent=r&&r.ok?`${r.aprobado?"✅":"⚠"} ${r.puntaje}/100 `+(r.problemas
 apLoad();
 
 /* ---------- dónde se publican los videos ---------- */
-const DST={fb:false,tt:false,fb_page:""};let dstOk=false;
-function dstDraw(){$("dest-fb").checked=DST.fb;$("dest-tt").checked=DST.tt;$("dd-fb").classList.toggle("on",DST.fb);$("dd-tt").classList.toggle("on",DST.tt);
-$("dest-fbbox").style.display=DST.fb?"":"none";if(document.activeElement!==$("dest-fbpage"))$("dest-fbpage").value=DST.fb_page||"";
-$("dfb-login").parentElement.style.display=DST.fb?"":"none";$("dtt-login").parentElement.style.display=DST.tt?"":"none";
-const s=["YouTube"];if(DST.fb)s.push("Facebook");if(DST.tt)s.push("TikTok");const sm=$("sum-7");if(sm&&sm.dataset.d!==s.join()){sm.dataset.d=s.join()}}
-async function dstSave(){const m=$("dest-msg");const r=await call("/destinos",DST,8000);m.className="sub"+(r&&r.ok?"":" err");m.textContent=r?(r.ok?"Guardado: se publicará en "+["YouTube"].concat(DST.fb?["Facebook"]:[],DST.tt?["TikTok"]:[]).join(" + ")+".":r.message):"No encuentro el worker. Ejecutá 2-INSTALAR-Y-EJECUTAR.bat."}
-$("dest-fb").onchange=e=>{DST.fb=e.target.checked;dstDraw();dstSave()};$("dest-tt").onchange=e=>{DST.tt=e.target.checked;dstDraw();dstSave()};
-let dstT=null;$("dest-fbpage").oninput=e=>{DST.fb_page=e.target.value.trim();clearTimeout(dstT);dstT=setTimeout(dstSave,700)};
+const DST={plataforma:"yt",fb_page:""};let dstOk=false;const DST_N={yt:"YouTube",fb:"Facebook",tt:"TikTok"};
+function dstDraw(){["yt","fb","tt"].forEach(k=>{$("dest-"+k).checked=DST.plataforma===k;$("dd-"+k).classList.toggle("on",DST.plataforma===k)});
+$("dfb-login").parentElement.style.display=DST.plataforma==="fb"?"":"none";$("dtt-login").parentElement.style.display=DST.plataforma==="tt"?"":"none";
+const sm=$("sum-7");if(sm)sm.dataset.d=DST_N[DST.plataforma]}
+async function dstSave(){const m=$("dest-msg");const r=await call("/destinos",DST,8000);m.className="sub"+(r&&r.ok?"":" err");m.textContent=r?(r.ok?"Guardado: todos los videos se subirán solo a "+DST_N[DST.plataforma]+".":r.message):"No encuentro el worker. Ejecutá 2-INSTALAR-Y-EJECUTAR.bat."}
+["yt","fb","tt"].forEach(k=>{$("dest-"+k).onchange=e=>{if(e.target.checked){DST.plataforma=k;dstDraw();dstSave()}}});
 async function dstLoad(){if(dstOk)return;const s=await call("/status");if(s&&s.destinos){Object.assign(DST,s.destinos);dstOk=true;dstDraw()}}
 dstDraw();dstLoad();setInterval(dstLoad,5000);
 

@@ -17,14 +17,24 @@ class RedError(Exception): pass
 
 
 # ------------------------------------------------------------------ dónde publicar
+PLATAFORMAS = ("yt", "fb", "tt")
+
+
+def _normalizar(d):
+    pl = str(d.get("plataforma") or "yt").lower()
+    if pl not in PLATAFORMAS: pl = "yt"
+    return {"plataforma": pl, "fb": pl == "fb", "tt": pl == "tt", "fb_page": str(d.get("fb_page") or "").strip()[:200]}
+
+
 def leer_destinos():
+    """UNA sola plataforma para todos los videos: yt (YouTube), fb (Facebook) o tt (TikTok)."""
     try: d = json.loads(DEST.read_text("utf-8"))
     except Exception: d = {}
-    return {"fb": bool(d.get("fb")), "tt": bool(d.get("tt")), "fb_page": str(d.get("fb_page") or "").strip()[:200]}
+    return _normalizar(d)
 
 
 def guardar_destinos(d):
-    cur = {"fb": bool(d.get("fb")), "tt": bool(d.get("tt")), "fb_page": str(d.get("fb_page") or "").strip()[:200]}
+    cur = _normalizar(d)
     tmp = DEST.with_suffix(".tmp"); tmp.write_text(json.dumps(cur, ensure_ascii=False), "utf-8"); tmp.replace(DEST)
     return cur
 
@@ -201,6 +211,8 @@ def facebook(ruta, texto, page="", chk=lambda: None, log=print):
         _diag(tab, "Facebook", paso, e)
         raise
     finally:
+        try: tab.ventana("minimized")                      # terminó: Chrome minimizado y se sigue con el próximo video
+        except Exception: pass
         try: tab.cerrar()
         except Exception: pass
 
@@ -244,6 +256,8 @@ def tiktok(ruta, texto, chk=lambda: None, log=print):
         _diag(tab, "TikTok", paso, e)
         raise
     finally:
+        try: tab.ventana("minimized")                      # terminó: Chrome minimizado y se sigue con el próximo video
+        except Exception: pass
         try: tab.cerrar()
         except Exception: pass
 
@@ -261,7 +275,7 @@ def publicar_extras(it, titulo, desc, chk=lambda: None, log=print, guardar=lambd
     for k in ("fb", "tt"):
         if not dest.get(k) or (ex.get(k) or {}).get("ok"): continue                  # ya publicado: no se duplica
         it["stage"] = f"Publicando en {NOMBRES[k]}…"; guardar()
-        print(f"  Publicando también en {NOMBRES[k]}…")
+        print(f"  Publicando en {NOMBRES[k]}…")
         try:
             r = facebook(ruta, texto_publicacion(titulo, desc, 2000), dest["fb_page"], chk, log) if k == "fb" else tiktok(ruta, texto_publicacion(titulo, desc, 2000), chk, log)
             ex[k] = {"ok": True, "msg": "Publicado" if r == "ok" else "Enviado (la página no mostró confirmación: revisalo)", "t": time.time()}

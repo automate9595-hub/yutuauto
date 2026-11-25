@@ -1530,6 +1530,7 @@ def _extras(d, it):
     """Después de YouTube: el mismo video con el mismo título y descripción en Facebook / TikTok (si los elegiste en el panel «Dónde publicar»).
     Un fallo acá NUNCA reabre ni repite la subida de YouTube."""
     if it.get("status") not in ("published", "scheduled"): return
+    return                                                    # una sola plataforma por corrida: ya no se publica "además" en otra red
     dest = redes.leer_destinos()
     if not (dest["fb"] or dest["tt"]): return
     listo = it.get("stage") or "Publicado"
@@ -1561,9 +1562,34 @@ def _subir_item(d, tab, cid, it, cortadas, auto):
         except Exception: pass
     save(d)
 
+def _publicar_solo_en(d, it, plat):
+    """La plataforma elegida NO es YouTube: el video se sube SOLO a esa plataforma (Facebook o TikTok), sin tocar YouTube."""
+    nombre = redes.NOMBRES[plat]
+    try:
+        check_cancel(it)
+        it.pop("publishAt", None); it.pop("error", None); it["status"] = "uploading"; it["pct"] = 100; it["stage"] = f"Publicando en {nombre}…"; save(d)
+        redes.publicar_extras(it, it.get("final_title") or it.get("title"), it.get("ia_desc") or "", lambda: check_cancel(it), print, lambda: save(d))
+        r = (it.get("extras") or {}).get(plat) or {}
+        if r.get("ok"):
+            it["status"] = "published"; it["pct"] = 100; it["stage"] = f"Publicado en {nombre}"; it["fin_t"] = time.time(); it.pop("est", None); _fin_piloto(it)
+            print("Publicado en", nombre + ":", it.get("final_title") or it.get("title"))
+        else:
+            it["status"] = "ready"; it["pct"] = 100; it["stage"] = "Listo"; it["error"] = f"No se pudo publicar en {nombre}: {r.get('msg') or 'sin detalle'}"[:220]
+            print("No se pudo publicar en", nombre + ":", it.get("title"), "->", r.get("msg"))
+    except Cancelled:
+        it["status"] = "cancelled"; it["stage"] = "Cancelado"; print("Cancelado:", it.get("title"))
+    except Exception as e:
+        it["status"] = "ready"; it["pct"] = 100; it["stage"] = "Listo"; it["error"] = f"No se pudo publicar en {nombre}: {str(e)[:150]}"
+        print("No se pudo publicar en", nombre + ":", it.get("title"), "->", e)
+    save(d)
+
 def studio_upload(d, only=None, mode=None):
     pending = [i for i in d["items"] if i["status"] in ("ready", "uploading") and i.get("file") and (only is None or i["key"] in only)]
     if not pending: print("No hay videos listos para subir."); return
+    plat = redes.leer_destinos()["plataforma"]
+    if plat != "yt":                                          # plataforma elegida: Facebook o TikTok (YouTube no se toca)
+        for it in pending: _publicar_solo_en(d, it, plat)
+        write_plan([i for i in d["items"] if i.get("file") and i["status"] in ("ready", "scheduled", "published")]); return
     now_mode = (mode or d.get("config", {}).get("publish")) == "now"
     for it in pending:
         pa = plan_horario(d, it, now_mode)
@@ -1584,18 +1610,20 @@ def subir_en_vivo(d, hilo, mode):
     cfg = d.get("config", {}); now_mode = (mode or cfg.get("publish")) == "now"; auto = cfg.get("auto_reanudar", True)
     previos = [i for i in d["items"] if i["status"] == "ready" and i.get("file")]       # editados en corridas anteriores
     tab = cid = None; cortadas = set(); hechos = set(); falla_conexion = False
+    plat = redes.leer_destinos()["plataforma"]                                             # una sola plataforma para todos los videos
     while True:
         vivo = hilo.is_alive()                                                            # se mira ANTES de listar (evita carreras)
         listos = [i for i in d["items"] if i["status"] == "ready" and i.get("file") and i["key"] not in hechos]
         if not listos:
             if not vivo: break
             time.sleep(1.5); continue
-        if tab is None and not falla_conexion:
+        if plat == "yt" and tab is None and not falla_conexion:
             try:
                 tab, cid = _conectar_studio()
             except Exception as e:
                 falla_conexion = True; print("No pude preparar la subida:", e)
         it = listos[0]; hechos.add(it["key"])
+        if plat != "yt": save(d); _publicar_solo_en(d, it, plat); continue                 # Facebook o TikTok: se sube SOLO ahí
         if falla_conexion: marcar_fallo(d, [it], "No pude preparar la subida"); continue
         pa = plan_horario(d, it, now_mode)
         if pa: it["publishAt"] = pa

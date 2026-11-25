@@ -204,15 +204,14 @@
 <!-- 7 -->
 <section class="stp" data-n="7"><button class="stp-h" type="button" aria-expanded="false"><i class="num">7</i><span class="tt"><b>Publicación</b><small id="sum-7"></small></span><span class="chev">▾</span></button>
 <div class="stp-b">
-<div class="cfg"><label>Al subir a YouTube<select id="c-publish"><option value="now">Publicar de inmediato (Público)</option><option value="schedule">Programar según los horarios</option></select></label></div>
+<div class="cfg"><label>Al subir a YouTube (solo si la plataforma es YouTube)<select id="c-publish"><option value="now">Publicar de inmediato (Público)</option><option value="schedule">Programar según los horarios</option></select></label></div>
 <div class="dest" id="dest">
-<h3 style="margin:0 0 4px">📤 Dónde se publican los videos</h3>
-<p class="sub" style="margin:0 0 10px">Cada video se sube a YouTube y, si lo marcás, <b>el mismo video con el mismo título y descripción</b> también a tu Página de Facebook (como Reel) y a TikTok. Se publican al momento de subir (no usan la programación).</p>
+<h3 style="margin:0 0 4px">📤 ¿A qué plataforma se suben los videos?</h3>
+<p class="sub" style="margin:0 0 10px">Elegí <b>una sola</b>: todos los videos que se descargan y editan se suben únicamente ahí, con su título y descripción. Para cambiar de plataforma, cambiá la elección y volvé a ejecutar.</p>
 <div class="dgrid">
-<div class="dchip on lock"><b>▶ YouTube</b><small>Siempre activo</small></div>
-<label class="dchip" id="dd-fb"><input id="dest-fb" type="checkbox"><b>📘 Página de Facebook</b><small>Reel con título y descripción</small></label>
-<label class="dchip" id="dd-tt"><input id="dest-tt" type="checkbox"><b>🎵 TikTok</b><small>Video con título y descripción</small></label></div>
-<div class="cfg" id="dest-fbbox" style="margin-top:10px"><label class="wide">ID de la Página de Facebook (opcional; vacío = la que tengas seleccionada en Meta Business Suite)<input id="dest-fbpage" type="text" inputmode="numeric" placeholder="ej: 1234567890123" autocomplete="off"></label></div>
+<label class="dchip on" id="dd-yt"><input id="dest-yt" type="radio" name="dest" value="yt" checked><b>▶ YouTube</b><small>Todos los videos a tu canal</small></label>
+<label class="dchip" id="dd-fb"><input id="dest-fb" type="radio" name="dest" value="fb"><b>📘 Facebook</b><small>Reel desde facebook.com</small></label>
+<label class="dchip" id="dd-tt"><input id="dest-tt" type="radio" name="dest" value="tt"><b>🎵 TikTok</b><small>Video con título y descripción</small></label></div>
 <div class="row" style="margin-top:8px"><button class="btn ghost sm" id="dfb-login" type="button">🔑 Iniciar sesión en Facebook</button><button class="btn ghost sm" id="dfb-chk" type="button">Comprobar</button><small id="dfb-lmsg" class="sub"></small></div>
 <div class="row"><button class="btn ghost sm" id="dtt-login" type="button">🔑 Iniciar sesión en TikTok</button><button class="btn ghost sm" id="dtt-chk" type="button">Comprobar</button><small id="dtt-lmsg" class="sub"></small></div>
 <small id="dest-msg" class="sub"></small></div>
