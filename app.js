@@ -162,7 +162,7 @@ BUSY.includes(st)?`<button class="btn ghost sm danger" data-act="cancel" data-k=
 x.error?`<button class="btn ghost sm" data-act="diag" data-k="${k}">Ver diagnóstico</button>`:""].join("");
 const link=x.yt_url?`<a class="yl" href="${esc(x.yt_url)}" target="_blank" rel="noopener">Ver en YouTube ↗</a>`:"";
 return `<div class="pc">${x.type==="video"&&(x.thumb||(x.origen!=="tiktok"&&x.origen!=="facebook"))?`<img loading="lazy" src="${esc(x.thumb||"https://i.ytimg.com/vi/"+(x.id||"")+"/mqdefault.jpg")}" alt="" referrerpolicy="no-referrer" onerror="this.style.visibility='hidden'">`:""}<div><b>${esc(x.ia_title||x.title||x.url||"")}</b><span class="st ${esc(st)}">${ST[st]||esc(st)}</span><small>${x.kind==="short"?"Short":"Video"}${x.parts>1?" · Parte "+x.part+"/"+x.parts:""}${x.reanudar&&x.status==="ready"?" · se reanuda sola":""}${x.publishAt?" · "+new Date(x.publishAt).toLocaleString("es",{dateStyle:"medium",timeStyle:"short"}):""}</small>
-<div style="height:10px;border-radius:99px;background:#1a2538;overflow:hidden;margin:10px 0 4px"><span style="display:block;height:100%;width:${pct}%;min-width:${pct?4:0}px;border-radius:99px;background:${["error","cancelled"].includes(st)?"#8a5a66":BUSY.includes(st)?"#5b86ff":"#45c79b"}"></span></div><small class="pgt">${label}</small>${x.ia?`<small class="pgt">Ayuda IA: ${esc(x.ia)}</small>`:""}${link}${extrasTxt(x)}${x.aviso?`<small class="err">⚠ ${esc(x.aviso)}</small>`:""}${x.error?`<small class="err">${esc(x.error)}</small>`:""}${acts?`<div class="acts">${acts}</div>`:""}</div></div>`}).join("")}
+<div style="height:10px;border-radius:99px;background:var(--bd);overflow:hidden;margin:10px 0 4px"><span style="display:block;height:100%;width:${pct}%;min-width:${pct?4:0}px;border-radius:99px;background:${["error","cancelled"].includes(st)?"#8a5a66":BUSY.includes(st)?"#5b86ff":"#45c79b"}"></span></div><small class="pgt">${label}</small>${x.ia?`<small class="pgt">Ayuda IA: ${esc(x.ia)}</small>`:""}${link}${extrasTxt(x)}${x.aviso?`<small class="err">⚠ ${esc(x.aviso)}</small>`:""}${x.error?`<small class="err">${esc(x.error)}</small>`:""}${acts?`<div class="acts">${acts}</div>`:""}</div></div>`}).join("")}
 $("pub").onclick=async e=>{const b=e.target.closest("[data-act]");if(!b)return;const k=b.dataset.k,a=b.dataset.act;
 if(a==="prev"){const it=W.items.find(y=>y.key===k)||{},id=it.fid||k.split(":")[1].split("#")[0];openWin("Vista previa del video editado",`<video controls autoplay playsinline style="width:100%;max-height:70vh;border-radius:10px;background:#000" src="${API}/media/${encodeURIComponent(id)}_final.mp4"></video><p class="sub">Es el archivo ya editado, tal como se va a subir.</p>`);return}
 if(a==="diag"){verDiag();return}
@@ -372,3 +372,11 @@ const est=[...document.querySelectorAll("#win-body [data-e]")].filter(x=>x.check
 const r=await call("/limpiar",{estados:est,archivos:$("cl-arch").checked,rastros:$("cl-rast").checked,pilotos:$("cl-pil").checked},60000);
 if($("cl-web").checked){q=[];save();render()}
 m.className="msg"+(!r||!r.ok?" err":"");m.textContent=r?r.message:"No encuentro el worker. Ejecutá 2-INSTALAR-Y-EJECUTAR.bat.";poll()}};
+
+/* tema claro / oscuro (arriba a la derecha) */
+(function(){const R=document.documentElement,B=document.querySelectorAll("[data-theme-set]");
+function aplicar(t,guardar){R.setAttribute("data-theme",t);B.forEach(b=>{const on=b.dataset.themeSet===t;b.classList.toggle("on",on);b.setAttribute("aria-pressed",on)});
+const m=document.querySelector("meta[name=theme-color]");if(m)m.setAttribute("content",t==="light"?"#f3f6fb":"#070b14");
+if(guardar){try{localStorage.setItem("yutu_tema",t)}catch{}}}
+B.forEach(b=>b.addEventListener("click",()=>aplicar(b.dataset.themeSet,true)));
+aplicar(R.getAttribute("data-theme")==="light"?"light":"dark",false)})();

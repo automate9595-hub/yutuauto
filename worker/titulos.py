@@ -42,17 +42,58 @@ def sembrar(items):
             registrar(t)
             if i.get("ia_desc"): registrar_desc(i["ia_desc"])
 
+# ---------------- formato de títulos y descripciones: MAYÚSCULAS + emojis ----------------
+EMOJI = re.compile("[\U0001F000-\U0001FAFF\u2600-\u27BF\u2B50\u2B06\u2B1B\u2B1C\u2934\u2935\u2190-\u21FF\u2300-\u23FF\u25A0-\u25FF\u2705\u203C\u2049]\ufe0f?")
+EMOJIS_TITULO = ["🔥", "😱", "🤯", "😂", "💥", "⚡", "👀", "🏆", "😮", "🚀", "💯", "🎮"]
+EMOJIS_DESC = ["🔥", "👀", "😱", "💥", "👇", "🎮", "⚡", "😂"]
+MAX_EMOJIS_TITULO = 4
+
+def _elige(lista, semilla, n):
+    h = sum(ord(c) for c in str(semilla)) or 1
+    return [lista[(h + i * 5) % len(lista)] for i in range(n)]
+
+def formatear(t, maximo=95):
+    """Título SIEMPRE en MAYÚSCULAS y con emojis (2 a 4). Si no trae emojis se le agregan; si se pasa del largo, se recorta el texto y quedan los emojis."""
+    t = re.sub(r"\s+", " ", str(t or "")).strip().strip("\"“”«»").strip()
+    if not t: return t
+    t = t.upper()
+    ems = EMOJI.findall(t)
+    sin = re.sub(r"\s+", " ", EMOJI.sub("", t)).strip(" ·-–—|\"“”«»")
+    if len(ems) > MAX_EMOJIS_TITULO: ems = ems[:MAX_EMOJIS_TITULO]
+    if not ems: ems = _elige(EMOJIS_TITULO, sin, 2)
+    elif len(ems) == 1: ems = ems + [e for e in _elige(EMOJIS_TITULO, sin, 2) if e != ems[0]][:1]
+    cola = "".join(ems)
+    lim = maximo - len(cola) - 1
+    if len(sin) > lim:
+        corte = sin[:lim]; sin = (corte.rsplit(" ", 1)[0] if " " in corte[lim // 2:] else corte).rstrip(" ,;:-–—")
+    return (sin + " " + cola).strip()
+
+def formatear_desc(d, titulo=""):
+    """Descripción con emojis: si no trae ninguno, se le pone uno al inicio y una invitación al final antes de los hashtags."""
+    d = str(d or "").strip()
+    if not d: return d
+    sem = titulo or d
+    if len(EMOJI.findall(d)) < 2:
+        lineas = d.split("\n"); 
+        if not EMOJI.search(lineas[0]): lineas[0] = _elige(EMOJIS_DESC, sem, 1)[0] + " " + lineas[0]
+        d = "\n".join(lineas)
+        if len(EMOJI.findall(d)) < 2:
+            cuerpo, tags = (d.rsplit("\n", 1) + [""])[:2] if re.search(r"(^|\n)\s*#\w+[^\n]*$", d) else (d, "")
+            d = (cuerpo.rstrip() + " " + _elige(EMOJIS_DESC, sem + "x", 2)[1] + ("\n" + tags if tags else "")).strip()
+    return d
+
 def fallback(texto, tema, prohibidos, n=1):
     """Ultimo recurso sin IA: arma un titulo a partir de lo que se dice en el clip (no del titulo copiado)."""
     base = re.sub(r"\s+", " ", str(texto or "")).strip()
     frase = re.split(r"(?<=[.!?])\s+", base)[0][:62].strip(" ,;:-") if base else ""
     cand = [f"{frase.capitalize()}… 😱" if frase else "", f"{tema or 'Momento'}: lo que nadie esperaba", f"{tema or 'Momento'} que se volvió viral", f"No vas a creer este momento de {tema or 'este clip'}"]
     for c in [x for x in cand if x]:
-        if not repetido(c, prohibidos): return c[:95]
+        c = formatear(c)
+        if not repetido(c, prohibidos): return c
     k = n
     while True:
-        c = f"{(cand[1] if len(cand) > 1 else 'Clip')} #{k}"
-        if not repetido(c, prohibidos): return c[:95]
+        c = formatear(f"{(cand[1] if len(cand) > 1 else 'Clip')} {k}")
+        if not repetido(c, prohibidos): return c
         k += 1
 
 
@@ -82,11 +123,12 @@ def desc_fallback(titulo, texto, tema, otras, k=1):
     frases = [f.strip() for f in re.split(r"(?<=[.!?])\s+", re.sub(r"\s+", " ", str(texto or ""))) if len(f.strip()) > 12]
     base = (" ".join(frases[:2])[:230] + "\n\n") if frases else ""
     tag = re.sub(r"[^\w]", "", str(tema or "").title()) or "Viral"
-    cand = [f"{titulo}\n\n{base}#{tag} #shorts", f"{base}{titulo} · mira hasta el final.\n\n#{tag} #shorts #viral"]
+    cand = [f"🔥 {titulo}\n\n{base}👀 ¡Mirá hasta el final!\n\n#{tag} #shorts #viral", f"{base}😱 {titulo} · ¡no te lo pierdas! 👇\n\n#{tag} #shorts #viral"]
     for c in cand:
+        c = formatear_desc(c, titulo)
         if not desc_repetida(c, otras): return c.strip()
     n = k
     while True:
-        c = f"{titulo}\n\n{base}Parte {n} · #{tag} #shorts"
+        c = formatear_desc(f"🔥 {titulo}\n\n{base}Parte {n} 👀\n\n#{tag} #shorts #viral", titulo)
         if not desc_repetida(c, otras): return c.strip()
         n += 1

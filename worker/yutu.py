@@ -764,7 +764,7 @@ def verificar_publicado(tab, cid, it, chk):
 def textos_para_subir(it, cfg):
     """Titulo y descripcion finales. GARANTIA: nunca es igual (ni parecido) al titulo del video copiado, al original ni a uno ya usado.
     Devuelve (titulo, descripcion): el titulo siempre existe."""
-    if it.get("final_title") and it.get("ia_desc"): return it["final_title"], it["ia_desc"]      # reintento/reanudación: ya tiene su título único
+    if it.get("final_title") and it.get("ia_desc"): return titulos.formatear(it["final_title"], 100), titulos.formatear_desc(it["ia_desc"], it["final_title"])      # reintento/reanudación: ya tiene su título único
     original = it.get("title", "") if it.get("type") != "gen" else ""
     prohibidos = titulos.usados([i.get("final_title") or i.get("ia_title") for i in (D["items"] if D else []) if i is not it]) + ([original] if original else [])
     t, desc = (it.get("ia_title") or "").strip(), (it.get("ia_desc") or "").strip()
@@ -807,6 +807,7 @@ def textos_para_subir(it, cfg):
             except Exception: pass
     if not desc or titulos.desc_repetida(desc, otras):
         desc = titulos.desc_fallback(t, texto, (cfg or {}).get("tema_titulo", ""), otras, len(otras) + 1); print("  Descripción propia (única).")
+    t, desc = titulos.formatear(t, 95), titulos.formatear_desc(desc, t)                  # SIEMPRE en MAYÚSCULAS y con emojis
     it["ia_title"], it["ia_desc"], it["final_title"] = t, desc, t[:100]
     titulos.registrar(t[:100]); titulos.registrar_desc(desc)      # quedan guardados ya: ningun otro video podra repetirlos
     return t[:100], desc

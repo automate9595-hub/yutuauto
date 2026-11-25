@@ -16,7 +16,8 @@ MALO: «Mi experiencia jugando Minecraft» -> BUENO: «Sobreviví 100 Días en M
 MALO: «Conociendo Japón» -> BUENO: «10 Lugares de Japón que Debes Visitar en tu Primer Viaje»
 MALO: «Mi rutina de ejercicio» -> BUENO: «Rutina de 30 Minutos para Fortalecer Todo el Cuerpo en Casa»
 Los malos dicen más o menos de qué trata pero no dan una razón para verlo; los buenos tienen una propuesta clara: un número, un resultado, un reto o un beneficio concreto.
-Siempre sin mentir: la promesa del título debe cumplirse en el video."""
+Siempre sin mentir: la promesa del título debe cumplirse en el video.
+FORMATO DE LA CASA: los ejemplos de arriba muestran la idea, pero los títulos de Yutu se escriben SIEMPRE EN MAYÚSCULAS y con 2 a 4 emojis (ej: «SOBREVIVÍ 100 DÍAS EN MINECRAFT HARDCORE SIN MORIR 😱🔥»). Tienen que ser muy atractivos."""
 
 
 def _cargar():
@@ -64,7 +65,7 @@ def evaluar(titulo):
     """(puntaje 0-100, [problemas]). Mide lo que el título tiene que lograr: claro, específico, con razón para hacer clic."""
     t = re.sub(r"\s+", " ", str(titulo or "")).strip(); pro = []; p = 50
     if not t: return 0, ["vacío"]
-    n = len(t)
+    n = len(re.sub(r"[\U0001F000-\U0001FAFF\u2600-\u27BF\ufe0f]", "", t).strip())      # el largo se mide sin emojis
     if n < 22: p -= 18; pro.append("muy corto: no dice qué vas a encontrar")
     elif n <= 75: p += 12
     elif n <= 90: p += 2
@@ -74,8 +75,6 @@ def evaluar(titulo):
     else: pro.append("sin número ni dato concreto")
     if CURIOSIDAD.search(t) or "?" in t or ":" in t: p += 12
     else: pro.append("no despierta curiosidad (falta un resultado, reto o beneficio)")
-    letras = [c for c in t if c.isalpha()]
-    if letras and sum(c.isupper() for c in letras) / len(letras) > 0.7 and n > 12: p -= 10; pro.append("todo en mayúsculas")
-    if t.count("#") or len(re.findall(r"[\U0001F300-\U0001FAFF]", t)) > 2: p -= 8; pro.append("hashtags o demasiados emojis en el título")
+    if t.count("#") or len(re.findall(r"[\U0001F300-\U0001FAFF]", t)) > 5: p -= 8; pro.append("hashtags o demasiados emojis en el título")
     if len(t.split()) >= 6 and len(set(w.lower() for w in t.split())) < len(t.split()) - 2: p -= 6; pro.append("palabras repetidas")
     return max(0, min(100, p)), pro

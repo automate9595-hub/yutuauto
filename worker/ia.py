@@ -331,23 +331,35 @@ Responde SOLO este JSON: {{"fx_list": ["id", ...], "fx_mode": "seq|overlap|rando
                 "motivo": str(data.get("motivo", ""))[:120]}
     except Exception: return None
 
+def modo_textos(modo):
+    """Para títulos y descripciones elige SIEMPRE primero la IA de Gemini (las otras quedan de respaldo), salvo que hayas elegido «Solo …» o apagado la IA."""
+    m = str(modo or "alternar").replace("grok", "groq")
+    return "gemini_primero" if m in ("alternar", "groq_primero", "claude_primero") else m
+
+
+PROMPT_ESTILO = """ESTILO OBLIGATORIO DEL TÍTULO: TODO EN MAYÚSCULAS, con 2 a 4 emojis bien elegidos (al inicio, en medio o al final) que refuercen la emoción del clip (🔥😱🤯😂💥⚡👀🏆). Tiene que ser MUY ATRACTIVO: gancho fuerte, curiosidad, emoción o un dato concreto, que den ganas de tocar el video YA. Sin mentiras ni promesas falsas.
+ESTILO OBLIGATORIO DE LA DESCRIPCIÓN: la primera línea es un gancho potente con emojis; después 1 o 2 frases que cuenten lo que pasa en el clip con energía (con emojis intercalados), una invitación a mirar/comentar/suscribirse (ej: «👇 Contanos qué opinás en los comentarios» o «🔔 Suscribite para más»), y al final 3 a 5 hashtags relevantes."""
+
+
 def textos(modo, titulo, texto, kind, prohibidos=(), idioma="", descs=(), feedback=""):
-    """Titulo y descripcion NUEVOS: nunca iguales al original ni a los ya usados (lista 'prohibidos')."""
+    """Titulo y descripcion NUEVOS: nunca iguales al original ni a los ya usados (lista 'prohibidos'). Título en MAYÚSCULAS con emojis; elige primero Gemini."""
+    import titulos
     pro = "\n".join("- " + str(x)[:100] for x in list(prohibidos)[-40:]) or "(ninguno)"
-    data, p = pedir(f'''Eres editor de YouTube. Escribe un título y una descripción para este {"Short" if kind == "short" else "video"}.
+    data, p = pedir(f'''Eres un editor de YouTube experto en títulos virales. Escribe un título y una descripción para este {"Short" if kind == "short" else "video"}.
 Título original (NO lo copies ni lo parafrasees de cerca): "{titulo}". Contenido (extracto): {texto[:1500] or "(sin texto)"}
 Títulos que YA se usaron (el tuyo debe ser claramente distinto de todos, con otro gancho y otras palabras clave):
 {pro}
 Descripciones que YA se usaron (la tuya NO puede repetir sus frases ni su estructura; escribe otra distinta basada en este clip):
 {chr(10).join("- " + str(x)[:120].replace(chr(10), " ") for x in list(descs)[-12:]) or "(ninguna)"}
 {aprendizaje.guia()}
+{PROMPT_ESTILO}
 {("OJO, el título anterior salió flojo: " + feedback + " Escribí uno claramente mejor.") if feedback else ""}
-Reglas: {("idioma: " + idioma + ".") if idioma else "mismo idioma del contenido."} Título atractivo de máximo 90 caracteres basado en lo que PASA en este clip, sin mentiras ni promesas falsas, sin inventar datos; descripción de 2 a 3 frases y 3 a 5 hashtags al final.
-Responde SOLO este JSON: {{"titulo": "...", "descripcion": "..."}}''', modo)
+Reglas: {("idioma: " + idioma + ".") if idioma else "mismo idioma del contenido."} Título de máximo 90 caracteres (contando los emojis) basado en lo que PASA en este clip, sin inventar datos; descripción atractiva de 2 a 3 frases con emojis y 3 a 5 hashtags al final.
+Responde SOLO este JSON: {{"titulo": "...", "descripcion": "..."}}''', modo_textos(modo))
     try:
-        t, desc = str(data["titulo"]).strip(), str(data["descripcion"]).strip()
+        t, desc = titulos.formatear(str(data["titulo"])), titulos.formatear_desc(str(data["descripcion"]), str(data["titulo"]))
         if not t or not desc: return None
-        return {"titulo": t[:95], "descripcion": desc[:1500], "prov": NOMBRE[p]}
+        return {"titulo": t, "descripcion": desc[:1500], "prov": NOMBRE[p]}
     except Exception: return None
 
 def eventos(modo, titulo, frases, kind, L, permitidos):

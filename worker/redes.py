@@ -104,6 +104,20 @@ RX_FB_TRABAJANDO = re.compile(r"\bpublicando\b|subiendo|\buploading\b|\bposting\
 RX_FB_AVISO = re.compile(r"se est[aá] procesando tu (publicaci[oó]n|reel|v[ií]deo)|te avisaremos cuando|we.ll let you know|is being processed", re.I)   # cartel final: ya terminó
 
 
+ESPERA_MIN = 120          # segundos mínimos sin tocar nada: tras «Publicar» y, otra vez, tras desaparecer «Publicando»
+SUBIDA_ESTABLE = 3        # lecturas seguidas (cada 2 s) sin «Subiendo» antes de tocar «Publicar»
+RX_FB_SUBIENDO = r"\bsubiendo\b|\buploading\b|procesando (tu |el )?v[ií]deo|processing (your |the )?video"
+JS_ESTADO_FB = (r"""(function(){var t=((document.body&&document.body.innerText)||'').toLowerCase();
+return JSON.stringify({publicando:/\bpublicando\b|\bposting\b/.test(t),subiendo:/""" + RX_FB_SUBIENDO + r"""/.test(t),
+aviso:/se est[aá] procesando tu (publicaci[oó]n|reel|v[ií]deo)|te avisaremos cuando|we.ll let you know|is being processed/.test(t)})})()""")
+
+
+def _estado_fb(tab):
+    """Solo LEE la página (no toca nada): ¿hay cartel «Publicando», «Subiendo» o el aviso final «Se está procesando tu publicación»?"""
+    try: return json.loads(tab.eval(JS_ESTADO_FB) or "{}") or {"publicando": False, "subiendo": False, "aviso": False}
+    except Exception: return {"publicando": True, "subiendo": True, "aviso": False}       # si no se puede leer, se asume que sigue trabajando
+
+
 RX_FOTOVIDEO = r"^(foto/v[ií]deo|photo/video)$"
 RX_ANADIR = r"a[ñn]adir fotos?/v[ií]deos?|agregar fotos?/v[ií]deos?|add photos?/videos?"
 JS_VIDEO_ADJUNTO = r"""(function(){var a=window.__A('div[role=dialog]');
@@ -194,27 +208,43 @@ def facebook(ruta, texto, page="", chk=lambda: None, log=print):
         try: tab.call("Page.setInterceptFileChooserDialog", {"enabled": False})
         except Exception: pass
         if not adj: raise RedError("El video no llegó a cargarse en Facebook (el selector de archivos no recibió «" + pathlib.Path(str(ruta)).name + "»).")
-        paso = "escribir el título y la descripción y publicar"; escrito = False; click_pub = False; fin = time.time() + 20 * 60
+        # ---- 1) escribir título/descripción y ESPERAR a que el video termine de subir (cartel «Subiendo») antes de tocar «Publicar» (botón azul)
+        paso = "esperar a que el video termine de subir"; escrito = False; click_pub = False; fin = time.time() + 30 * 60; libres = 0; ult_log = 0
         while time.time() < fin:
             chk(); time.sleep(2)
             _clic(tab, r"^(aceptar|entendido|got it|ok)$")                                   # aviso 'los videos se comparten como reels'
             caja = None if escrito else _caja_texto_fb(tab)
             if caja:
                 tab.escribir(caja, texto, 0); escrito = True; time.sleep(1.5); continue
-            if escrito and _clic(tab, RX_PUBLICAR): click_pub = True; break                 # solo se habilita cuando el video terminó de subir
-            if escrito: _clic(tab, r"^(siguiente|next|continuar|continue)$")
-        if not click_pub: raise RedError("El video no quedó listo para «Publicar» en Facebook (tardó más de 20 minutos o cambió la pantalla).")
-        paso = "esperar a que Facebook termine de publicar"; t0 = time.time(); visto_aviso = False
-        log("  Facebook: tocó «Publicar»; espero a que terminen «Publicando» y «Subiendo» (hasta 15 min)…")
-        while time.time() - t0 < 15 * 60:
-            chk(); time.sleep(2); b = _body(tab); seg = time.time() - t0
-            _clic(tab, r"^(publicar ahora|post now|share now|compartir ahora)$")
-            trabajando = bool(RX_FB_TRABAJANDO.search(b))
-            if RX_FB_AVISO.search(b): visto_aviso = True
-            if visto_aviso and not trabajando: time.sleep(5); return "ok"                  # apareció «Se está procesando tu publicación»: terminó
-            if seg >= 20 and not trabajando and not _dialogo_fb(tab): time.sleep(5); return "ok"   # la ventana se cerró sola y ya no hay nada subiendo
-            if seg >= 120 and not trabajando and visto_aviso is False and not _caja_texto_fb(tab): time.sleep(5); return "ok"
-        return "enviado"
+            if not escrito: continue
+            f = _estado_fb(tab)
+            if f["subiendo"] or f["publicando"]:
+                libres = 0
+                if time.time() - ult_log > 30: log("  Facebook: el video todavía está subiendo; espero a que termine antes de tocar «Publicar»…"); ult_log = time.time()
+                continue
+            libres += 1
+            if libres < SUBIDA_ESTABLE: continue                                             # el cartel «Subiendo» tiene que estar ausente varias lecturas seguidas
+            if _clic(tab, RX_PUBLICAR): click_pub = True; break                              # botón azul: solo se toca con la subida completa
+            _clic(tab, r"^(siguiente|next|continuar|continue)$"); libres = 0
+        if not click_pub: raise RedError("El video no terminó de subir o no quedó listo para «Publicar» en Facebook (más de 30 minutos o cambió la pantalla).")
+        # ---- 2) «Publicando»: NO se toca nada. Mínimo 2 minutos y hasta que el cartel «Publicando» haya desaparecido
+        paso = "esperar a que desaparezca «Publicando»"; t0 = time.time(); visto_pub = False; t_fin_pub = None
+        log(f"  Facebook: toqué «Publicar». No toco nada: espero mínimo {ESPERA_MIN//60} minutos y a que desaparezca «Publicando»…")
+        while time.time() - t0 < 20 * 60:
+            chk(); time.sleep(1); f = _estado_fb(tab)
+            if f["publicando"]: visto_pub = True
+            if f["aviso"]: t_fin_pub = t_fin_pub or time.time()
+            if time.time() - t0 >= ESPERA_MIN and not f["publicando"] and (visto_pub or time.time() - t0 >= ESPERA_MIN + 30): break
+        else:
+            return "enviado"
+        # ---- 3) «Publicando» ya no está: sin tocar nada, mínimo 2 minutos más y hasta que aparezca el cartel «Se está procesando tu publicación…» (abajo a la izquierda)
+        paso = "esperar el cartel «Se está procesando tu publicación»"; t1 = time.time(); visto_aviso = t_fin_pub is not None
+        log(f"  Facebook: «Publicando» desapareció. Sigo sin tocar nada: mínimo {ESPERA_MIN//60} minutos y hasta ver el cartel «Se está procesando tu publicación»…")
+        while time.time() - t1 < 12 * 60:
+            chk(); time.sleep(0.7); f = _estado_fb(tab)
+            if f["aviso"]: visto_aviso = True
+            if visto_aviso and time.time() - t1 >= ESPERA_MIN: time.sleep(3); return "ok"     # recién ahora se puede minimizar y seguir con el próximo short
+        return "ok" if visto_aviso else "enviado"
     except Exception as e:
         _diag(tab, "Facebook", paso, e)
         raise
