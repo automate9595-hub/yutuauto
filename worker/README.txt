@@ -96,7 +96,7 @@ NOVEDADES v18
   por todas las etapas verificando que la pantalla cambie, y publica ("Publicar de todas formas" si pregunta).
 - TITULOS UNICOS: nunca se usa el título del video copiado, el original ni uno ya usado (registro en titulos-usados.json).
 
-1) Ejecuta 2-INSTALAR-Y-EJECUTAR.bat. Instala todo con pip, se cierra solo y deja el worker
+1) Ejecuta 2-INSTALAR-Y-EJECUTAR.bat. Instala todo con pip, queda abierta hasta que apretes una tecla y deja el worker
    en segundo plano con un icono "Y" junto al wifi/bateria (verde = activo, azul = procesando).
 2) En la web hay 9 pasos desplegables: Conectar, Videos, Subtitulos, Recorte, Efectos, IA, Publicacion,
    Ejecutar y Publicaciones. Abri cada uno, elegi lo que quieras y toca "Siguiente".
