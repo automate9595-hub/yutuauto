@@ -36,14 +36,14 @@ def ia_activa(cfg):
 
 def make_plan(cfg, upload):
     w = {"dl": .20, "ia": .08 if (ia_activa(cfg) and cfg.get("ia_cut")) else 0,
-         "sub": .20 if cfg.get("sub", True) else 0, "edit": .40, "up": .20 if upload else 0}
+         "sub": .10 if cfg.get("ia_mode", "alternar") != "apagado" else 0, "edit": .40, "up": .20 if upload else 0}
     tot = sum(w.values()); acc = 0; plan = {}
     for k in ("dl", "ia", "sub", "edit", "up"):
         plan[k] = (acc / tot, w[k] / tot); acc += w[k]
     return plan
 
 _PASADA = str(os.getpid()) + "-" + str(int(time.time()))      # cada ejecución del proceso es una pasada nueva
-LABEL = {"dl": "Descargando", "ia": "Analizando con IA", "sub": "Subtitulos", "edit": "Editando", "up": "Subiendo"}
+LABEL = {"dl": "Descargando", "ia": "Analizando con IA", "sub": "Leyendo el clip", "edit": "Editando", "up": "Subiendo"}
 def set_prog(it, stage, frac, force=False):
     off, wt = PLAN.get(stage, (0, 1))
     pct = int(round(100 * (off + wt * max(0.0, min(1.0, frac)))))
@@ -186,7 +186,7 @@ def subtitles(it, src, start, length, cfg, short):
         print("  Subtítulos: reutilizo la transcripción del análisis (sin repetir el trabajo).")
     else: words = voz.palabras(FFMPEG, src, start, length, cfg.get("lang", "es"), cfg.get("model", "small"),
                          lambda f: set_prog(it, "sub", f), lambda: check_cancel(it),
-                         motor=cfg.get("stt", "auto"), titulo=it.get("title", ""))
+                         motor=cfg.get("stt", "auto"), titulo=it.get("title", ""), solo_nube=True)       # nunca el modelo local (pesa mucho en 2 GB)
     set_prog(it, "sub", 1.0, True)
     maxw = int(cfg.get("sub_words") or (4 if short else 8))
     caps, cur = [], []
@@ -198,17 +198,6 @@ def subtitles(it, src, start, length, cfg, short):
         if w.word.strip()[-1:] in ".?!": flush()
     flush()
     if not caps: return None
-    if ia_activa(cfg) and cfg.get("ia_sub"):
-        txt = [c[2] for c in caps]; mejor = txt[:]; prov = None
-        check_cancel(it)
-        lotes = list(range(0, min(len(txt), 600), 120))
-        with cf.ThreadPoolExecutor(max_workers=3) as ex:               # lotes en paralelo: se turnan las IAs y tarda 1/3
-            res = list(ex.map(lambda i: (i, ia.corregir_subs(cfg.get("ia_mode", "alternar"), it.get("title", ""), txt[i:i + 120])), lotes))
-        for i, r in res:
-            if r: mejor[i:i + 120] = r["lineas"]; prov = r["prov"]
-        if prov:
-            caps = [(a, b, mejor[k]) for k, (a, b, _) in enumerate(caps)]; it["_sub_ia"] = prov
-            print(f"  [IA {prov}] Subtitulos corregidos.")
     srt = MEDIA / f"{fid(it)}.srt"
     with open(srt, "w", encoding="utf-8") as f:
         for i, (a, b, t) in enumerate(caps, 1):
@@ -219,7 +208,7 @@ def transcribe_full(it, src, cfg, dur):
     """Transcripcion de todo el video, solo para que la IA elija el mejor tramo (si fue en la nube se reutiliza en los subtitulos)."""
     words = voz.palabras(FFMPEG, src, 0, dur, cfg.get("lang", "es"), "base",
                          lambda f: set_prog(it, "ia", f), lambda: check_cancel(it), motor="rapido", titulo=it.get("title", ""),
-                         solo_nube=dur > 300)            # transcribir un video largo en la PC la cuelga: si no hay nube, se usa el corte normal
+                         solo_nube=True)            # solo en la nube: nunca el modelo local
     if str(getattr(voz, "ULTIMO", "")).startswith("groq") and cfg.get("stt", "auto") in ("auto", "groq_turbo", "groq_v3"): it["_full_words"] = words
     return voz.frases(words)
 
@@ -284,13 +273,7 @@ def build_vf(cfg, short, L, srt):
     if cfg.get("vivid"): vf.append("eq=contrast=1.06:saturation=1.25:brightness=0.01,unsharp=5:5:0.6")
     if cfg.get("vignette"): vf.append("vignette=PI/5")
     if cfg.get("fade"): vf.append(f"fade=t=in:st=0:d=0.5,fade=t=out:st={max(L - 0.5, 0):.2f}:d=0.5")
-    if srt is not None:
-        size = {"s": (12, 14), "m": (16, 20), "l": (20, 26)}[cfg.get("sub_size", "m") if cfg.get("sub_size", "m") in "sml" else "m"][0 if short else 1]
-        col = {"white": "&H00FFFFFF", "yellow": "&H0000FFFF", "green": "&H0080FF80"}.get(cfg.get("sub_color", "white"), "&H00FFFFFF")
-        pos = cfg.get("sub_pos", "bottom")
-        al, mv = {"bottom": (2, 70 if short else 20), "middle": (10, 0), "top": (6, 40 if short else 15)}.get(pos, (2, 20))
-        style = f"FontName=Arial,Alignment={al},FontSize={size},Bold=1,Outline=3,Shadow=0,PrimaryColour={col},OutlineColour=&H00000000,MarginV={mv}"
-        vf.append(f"subtitles={srt.name}:force_style='{style}'")
+    # los subtítulos NUNCA se queman en el video
     return ",".join(vf)
 
 def build_af(cfg, L):
@@ -468,8 +451,8 @@ def process(it, cfg):
         if abs(ns - start) > 0.01: print(f"  Ese tramo ya se usó en otro Short; tomo otro distinto desde {ns:.0f}s."); start = ns
     print(f"  Tramo: {start:.0f}s -> {start + L:.0f}s ({L:.0f}s de {dur:.0f}s)")
     srt = None
-    if cfg.get("sub", True):
-        print("  [2/3] Subtitulos...")
+    if ia_activa(cfg):                                     # solo se LEE lo que se dice (nube), para que la IA escriba bien título y descripción; no se agrega ningún subtítulo
+        print("  [2/3] Leyendo lo que se dice en el clip (no se agregan subtítulos)...")
         try: srt = subtitles(it, src, start, L, cfg, short)
         except Cancelled: raise
         except Exception as e: print("  Sin subtitulos:", str(e)[:200])
@@ -504,10 +487,7 @@ def process(it, cfg):
         shutil.copy(src, final); set_prog(it, "edit", 1.0, True)   # completo y sin efectos: no se recodifica
     else:
         try: _encode_resiliente(it, src, start, L, vf, af, final)
-        except subprocess.CalledProcessError as e:
-            if srt is None: raise RuntimeError("FFmpeg: " + str(e.output)[:200])
-            print("  FFmpeg no pudo quemar subtitulos; reintento sin ellos.")
-            _encode_resiliente(it, src, start, L, build_vf(ecfg, short, L, None), af, final)
+        except subprocess.CalledProcessError as e: raise RuntimeError("FFmpeg: " + str(e.output)[:200])
     if th_txt:
         th_txt.join(120); r = res_txt.get("r")
         if r: it["ia_title"], it["ia_desc"] = r["titulo"], r["descripcion"]; ayuda.append("título " + r["prov"]); print(f"  [IA {r['prov']}] Título: {r['titulo']}")
@@ -801,7 +781,9 @@ def verificar_publicado(tab, cid, it, chk):
 def textos_para_subir(it, cfg):
     """Titulo y descripcion finales. GARANTIA: nunca es igual (ni parecido) al titulo del video copiado, al original ni a uno ya usado.
     Devuelve (titulo, descripcion): el titulo siempre existe."""
-    if it.get("final_title") and it.get("ia_desc"): return titulos.formatear(it["final_title"], 100), titulos.formatear_desc(it["ia_desc"], it["final_title"])      # reintento/reanudación: ya tiene su título único
+    if it.get("final_title") and it.get("ia_desc"):
+        tg = titulos.etiquetas((cfg or {}).get("hashtags_base"))
+        return titulos.ajustar(titulos.sin_video(titulos.formatear(it["final_title"], 100), tg), 100), titulos.sin_video(titulos.formatear_desc(it["ia_desc"], it["final_title"]), tg)      # reintento/reanudación: ya tiene su título único
     original = it.get("title", "") if it.get("type") != "gen" else ""
     orig_ia = titulos.limpiar_original(orig_ia) or "(sin título)"       # sin hashtags ni "video"
     tags = titulos.etiquetas((cfg or {}).get("hashtags_base")); uso_fallback = False
@@ -850,6 +832,7 @@ def textos_para_subir(it, cfg):
     if uso_fallback:                                                                     # sin IA: los hashtags por defecto van en la descripción y (si está activado) al final del título
         if not all(h.lower() in desc.lower() for h in tags.split()): desc = desc.rstrip() + "\n\n" + tags
         if (cfg or {}).get("hashtags_titulo", True): t = titulos.con_etiquetas(t, tags, 100)
+    t, desc = titulos.ajustar(titulos.sin_video(t, tags), 100), titulos.sin_video(desc, tags)       # NUNCA queda la palabra «video»: va el set de hashtags
     it["ia_title"], it["ia_desc"], it["final_title"] = t, desc, t[:100]
     titulos.registrar(t[:100]); titulos.registrar_desc(desc)      # quedan guardados ya: ningun otro video podra repetirlos
     return t[:100], desc
@@ -1631,8 +1614,10 @@ def _publicar_solo_en(d, it, plat):
     nombre = redes.NOMBRES[plat]
     try:
         check_cancel(it)
-        it.pop("publishAt", None); it.pop("error", None); it["status"] = "uploading"; it["pct"] = 100; it["stage"] = f"Publicando en {nombre}…"; save(d)
-        redes.publicar_extras(it, it.get("final_title") or it.get("title"), it.get("ia_desc") or "", lambda: check_cancel(it), print, lambda: save(d))
+        it.pop("publishAt", None); it.pop("error", None); it["status"] = "uploading"; it["pct"] = 100; it["stage"] = f"Armando título y descripción…"; save(d)
+        titulo, desc = textos_para_subir(it, d.get("config"))                      # título y descripción PROPIOS (antes acá salía el título copiado del reel)
+        it["stage"] = f"Publicando en {nombre}…"; save(d)
+        redes.publicar_extras(it, titulo, desc, lambda: check_cancel(it), print, lambda: save(d))
         r = (it.get("extras") or {}).get(plat) or {}
         if r.get("ok"):
             it["status"] = "published"; it["pct"] = 100; it["stage"] = f"Publicado en {nombre}"; it["fin_t"] = time.time(); it.pop("est", None); _fin_piloto(it)

@@ -9,7 +9,7 @@
 
 <main id="top">
 <section class="hero"><div><h1>Pegá links. <em>Se publica solo.</em></h1>
-<p>Seguí los pasos de abajo y elegí lo que quieras en cada uno. Al final, un solo botón descarga, recorta, subtitula, edita y publica en tu canal.</p></div>
+<p>Seguí los pasos de abajo y elegí lo que quieras en cada uno. Al final, un solo botón descarga, recorta, edita y publica en tu canal.</p></div>
 <div class="stats"><div class="stat"><small>EN COLA</small><strong id="s-total">0</strong></div><div class="stat"><small>SHORTS</small><strong id="s-short">0</strong></div><div class="stat"><small>VIDEOS</small><strong id="s-video">0</strong></div><div class="stat acc"><small>PUBLICADOS</small><strong id="s-pub">0</strong></div></div></section>
 
 <nav class="ptabs" id="ptabs" aria-label="Pilotos automáticos">
@@ -80,7 +80,7 @@
 <small id="fb-estado" class="sub"></small></section>
 <section class="card pad" id="pia" style="display:grid;gap:12px;margin:0 0 16px">
 <h3 style="margin:0">🤖 Piloto creador IA: Shorts hechos 100 % por IA</h3>
-<p class="sub" style="margin:0">Elegí un tema central y cuántos Shorts querés por día. Gemini, Groq y Claude se turnan (idea → guion → título); si una falla, la siguiente sigue sin cortar el proceso. Narra con voz neuronal, genera las imágenes, subtitula y publica solo, sin repetir ideas ni títulos.</p>
+<p class="sub" style="margin:0">Elegí un tema central y cuántos Shorts querés por día. Gemini, Groq y Claude se turnan (idea → guion → título); si una falla, la siguiente sigue sin cortar el proceso. Narra con voz neuronal, genera las imágenes y publica solo, sin repetir ideas ni títulos.</p>
 <div class="row"><input id="pi-tema" type="search" placeholder="Tema central · ej: datos curiosos de Mobile Legends" style="flex:1;min-width:220px" autocomplete="off"></div>
 <div class="cfg" style="grid-template-columns:repeat(auto-fit,minmax(130px,1fr))">
 <label>Shorts por día<input id="pi-shorts" type="number" min="1" max="40"></label>
@@ -100,7 +100,7 @@
 <div class="stp-b"><p class="sub">Ejecutá <code>worker\2-INSTALAR-Y-EJECUTAR.bat</code> una vez: queda en segundo plano con un icono "Y" junto al wifi. <span id="yt-need">Después conectá tu canal (solo la primera vez).</span></p>
 <div id="yt-block"><div class="row"><button class="btn pri" id="connect">Conectar con mi canal de YouTube ▷</button><button class="btn ghost sm" id="force">Ya inicié sesión en Studio: marcar como conectado</button><button class="btn ghost sm" id="open-guide">Ver guía</button></div>
 <div id="yt-detail" class="sub"></div></div>
-<p id="yt-skip" class="sub" style="display:none">✔ Estás subiendo a <b id="yt-skip-n">Facebook</b>: <b>no hace falta conectar YouTube</b>. Iniciá sesión en esa plataforma en el paso 7.</p>
+<p id="yt-skip" class="sub" style="display:none">✔ Estás subiendo a <b id="yt-skip-n">Facebook</b>: <b>no hace falta conectar YouTube</b>. Iniciá sesión en esa plataforma en el paso 6.</p>
 <div class="nav-step"><span></span><button class="btn pri" data-go="2" type="button">Siguiente: videos →</button></div></div></section>
 
 <!-- 2 -->
@@ -109,27 +109,10 @@
 <textarea id="links" spellcheck="false" placeholder="https://www.youtube.com/watch?v=xxxxxxxxxxx&#10;https://youtube.com/shorts/yyyyyyyyyyy&#10;https://www.youtube.com/playlist?list=PLxxxx"></textarea>
 <div class="row"><button class="btn pri" id="add">Analizar y agregar →</button><button class="btn ghost" id="clr">Limpiar</button><span id="msg" class="msg"></span></div>
 <div class="listbox"><div class="bar"><b id="qcount">0 elementos</b><div class="row"><button class="btn ghost sm" id="all-short">Todos Shorts</button><button class="btn ghost sm" id="all-video">Todos Videos</button><button class="btn ghost sm danger" id="empty">Vaciar</button></div></div><div id="list"></div></div>
-<div class="nav-step"><button class="btn ghost" data-go="1" type="button">← Atrás</button><button class="btn pri" data-go="3" type="button">Siguiente: subtítulos →</button></div></div></section>
+<div class="nav-step"><button class="btn ghost" data-go="1" type="button">← Atrás</button><button class="btn pri" data-go="3" type="button">Siguiente: recorte →</button></div></div></section>
 
 <!-- 3 -->
-<section class="stp" data-n="3"><button class="stp-h" type="button" aria-expanded="false"><i class="num">3</i><span class="tt"><b>Subtítulos</b><small id="sum-3"></small></span><span class="chev">▾</span></button>
-<div class="stp-b">
-<label class="chk big-chk"><input id="c-sub" type="checkbox"> Quemar subtítulos en el video</label>
-<div class="grp open"><button class="grp-h" type="button">Reconocimiento de voz <small id="g-voz"></small></button><div class="grp-b cfg">
-<label>Idioma<select id="c-lang"><option value="es-latino">Español latino (recomendado)</option><option value="es">Español (general)</option><option value="en">Inglés</option><option value="auto">Detectar solo (si mezcla idiomas)</option></select></label>
-<label>Motor<select id="c-stt"><option value="auto">Automático: el mejor disponible (Groq large-v3 → turbo → tu PC)</option><option value="groq_v3">Groq · Whisper large-v3 (el más preciso, en la nube)</option><option value="groq_turbo">Groq · Whisper large-v3-turbo (muy bueno y más rápido)</option><option value="local">En tu PC · faster-whisper (sin internet)</option><option value="vosk">En tu PC · Vosk (ligero, el más flojo)</option></select></label>
-<label>Modelo para el motor de tu PC<select id="c-model"><option value="tiny">tiny — rapidísimo, impreciso</option><option value="base">base — rápido</option><option value="small">small — equilibrado</option><option value="medium">medium — preciso, necesita ~5 GB de RAM</option><option value="large-v3-turbo">large-v3-turbo — muy preciso, ~3 GB</option><option value="large-v3">large-v3 — el mejor, ~5 GB y lento</option></select></label>
-<p class="sub">Con la clave de Groq cargada, el modo Automático transcribe en la nube con Whisper large-v3 (mucho mejor que "small") y usa el título del video como pista para escribir bien los nombres. Si Groq falla, sigue solo con tu PC. Además, la IA puede corregir ortografía en el paso 6.</p></div></div>
-<div class="grp"><button class="grp-h" type="button">Aspecto <small id="g-asp"></small></button><div class="grp-b cfg">
-<label>Posición<select id="c-sub_pos"><option value="bottom">Abajo</option><option value="middle">Centro</option><option value="top">Arriba</option></select></label>
-<label>Tamaño<select id="c-sub_size"><option value="s">Pequeño</option><option value="m">Mediano</option><option value="l">Grande</option></select></label>
-<label>Color<select id="c-sub_color"><option value="white">Blanco</option><option value="yellow">Amarillo</option><option value="green">Verde</option></select></label>
-<label>Palabras por línea<input id="c-sub_words" type="number" min="1" max="12" placeholder="Auto"></label>
-<label class="chk"><input id="c-sub_caps" type="checkbox"> TODO EN MAYÚSCULAS</label></div></div>
-<div class="nav-step"><button class="btn ghost" data-go="2" type="button">← Atrás</button><button class="btn pri" data-go="4" type="button">Siguiente: recorte →</button></div></div></section>
-
-<!-- 4 -->
-<section class="stp" data-n="4"><button class="stp-h" type="button" aria-expanded="false"><i class="num">4</i><span class="tt"><b>Recorte</b><small id="sum-4"></small></span><span class="chev">▾</span></button>
+<section class="stp" data-n="3"><button class="stp-h" type="button" aria-expanded="false"><i class="num">3</i><span class="tt"><b>Recorte</b><small id="sum-3"></small></span><span class="chev">▾</span></button>
 <div class="stp-b">
 <div class="grp open"><button class="grp-h" type="button">Shorts (vertical 9:16)</button><div class="grp-b cfg">
 <label>Qué tramo usar<select id="c-cut_mode"><option value="auto">Automático (la IA elige el mejor; si no, desde el 10 %)</option><option value="inicio">Desde el inicio</option><option value="manual">Segundo exacto</option></select></label>
@@ -145,10 +128,10 @@
 <label class="chk"><input id="c-vid_trim" type="checkbox"> Recortar también los videos largos</label>
 <label>Inicio del recorte<span class="two"><input id="u-vid_start" type="number" min="0" step="any" placeholder="0"><select id="us-vid_start"><option value="m">minutos</option><option value="s">segundos</option></select></span></label>
 <label>Duración máxima (minutos, 0 = hasta el final)<input id="c-vid_len" type="number" min="0"></label></div></div>
-<div class="nav-step"><button class="btn ghost" data-go="3" type="button">← Atrás</button><button class="btn pri" data-go="5" type="button">Siguiente: efectos →</button></div></div></section>
+<div class="nav-step"><button class="btn ghost" data-go="2" type="button">← Atrás</button><button class="btn pri" data-go="4" type="button">Siguiente: efectos →</button></div></div></section>
 
-<!-- 5 -->
-<section class="stp" data-n="5"><button class="stp-h" type="button" aria-expanded="false"><i class="num">5</i><span class="tt"><b>Efectos y acabado</b><small id="sum-5"></small></span><span class="chev">▾</span></button>
+<!-- 4 -->
+<section class="stp" data-n="4"><button class="stp-h" type="button" aria-expanded="false"><i class="num">4</i><span class="tt"><b>Efectos y acabado</b><small id="sum-4"></small></span><span class="chev">▾</span></button>
 <div class="stp-b">
 <div class="grp open"><button class="grp-h" type="button">Acabado <small>(una sola pasada de FFmpeg)</small></button><div class="grp-b cfg">
 <label class="chk"><input id="c-vivid" type="checkbox"> Color vivo y nitidez</label>
@@ -167,10 +150,10 @@
 <label>Intensidad (0.2 a 1.5)<input id="c-fx_power" type="number" min="0.2" max="1.5" step="0.1"></label>
 <label>Empezar en el segundo<input id="c-fx_start" type="number" min="0" step="1"></label>
 <label class="chk"><input id="c-fx_repeat" type="checkbox"> Repetir hasta el final</label></div></div></div>
-<div class="nav-step"><button class="btn ghost" data-go="4" type="button">← Atrás</button><button class="btn pri" data-go="6" type="button">Siguiente: IA →</button></div></div></section>
+<div class="nav-step"><button class="btn ghost" data-go="3" type="button">← Atrás</button><button class="btn pri" data-go="5" type="button">Siguiente: IA →</button></div></div></section>
 
-<!-- 6 -->
-<section class="stp" data-n="6"><button class="stp-h" type="button" aria-expanded="false"><i class="num">6</i><span class="tt"><b>Inteligencia artificial</b><small id="sum-6"></small></span><span class="chev">▾</span></button>
+<!-- 5 -->
+<section class="stp" data-n="5"><button class="stp-h" type="button" aria-expanded="false"><i class="num">5</i><span class="tt"><b>Inteligencia artificial</b><small id="sum-5"></small></span><span class="chev">▾</span></button>
 <div class="stp-b">
 <p class="sub">Gemini, Groq y Claude se turnan: si uno falla o no tiene cuota, sigue el siguiente, y si fallan todos la edición continúa igual. Las claves se guardan solo en tu PC (<code>worker\claves-ia.json</code>). <span id="ia-est"></span></p>
 <div class="grp open"><button class="grp-h" type="button">Qué hace la IA</button><div class="grp-b cfg">
@@ -179,7 +162,6 @@
 <div class="cfg" style="margin-top:8px"><label>Hashtags por defecto (cuando la IA no responde o está apagada)<input id="c-hashtags_base" type="text" placeholder="#MobileLegends #mlbb #shorts #gameplay #fyp"></label></div>
 <label class="chk"><input id="c-hashtags_titulo" type="checkbox"> En ese caso, ponerlos también al final del título (los que entren)</label>
 <label class="chk"><input id="c-ia_cut" type="checkbox"> Elegir el mejor tramo (Shorts en modo automático)</label>
-<label class="chk"><input id="c-ia_sub" type="checkbox"> Corregir los subtítulos</label>
 <label class="chk"><input id="c-ia_fx" type="checkbox"> Elegir y combinar efectos</label>
 <label class="chk"><input id="c-ia_zoom" type="checkbox"> Zooms y efectos en los momentos clave (la IA decide cuándo; sin IA, por ritmo del discurso)</label></div></div>
 <div class="grp"><button class="grp-h" type="button">Gemini <small id="ia-gemini"></small></button><div class="grp-b cfg">
@@ -191,7 +173,7 @@
 <div class="grp"><button class="grp-h" type="button">Groq <small id="ia-groq"></small></button><div class="grp-b cfg">
 <input id="k-groq" type="password" placeholder="Pegá la clave de Groq (gsk_…)" autocomplete="off">
 <div class="row"><button class="btn pri sm" data-ia="groq" data-a="save">Guardar clave</button><button class="btn ghost sm" data-ia="groq" data-a="test">Probar</button><button class="btn ghost sm danger" data-ia="groq" data-a="del">Borrar</button></div>
-<p class="sub">La misma clave de Groq se usa para los subtítulos con Whisper large-v3.</p></div></div>
+<p class="sub">La misma clave de Groq se usa para leer lo que se dice en el clip (solo para que la IA escriba mejor el título y la descripción; no se agregan subtítulos al video).</p></div></div>
 <div class="grp"><button class="grp-h" type="button">Claude <small id="ia-claude"></small></button><div class="grp-b cfg">
 <input id="k-claude" type="password" placeholder="Pegá la clave de Claude" autocomplete="off">
 <div class="row"><button class="btn pri sm" data-ia="claude" data-a="save">Guardar clave</button><button class="btn ghost sm" data-ia="claude" data-a="test">Probar</button><button class="btn ghost sm danger" data-ia="claude" data-a="del">Borrar</button></div>
@@ -204,10 +186,10 @@
 <div class="row"><input id="ap-test" type="text" placeholder="Probá un título para ver qué puntaje le da" style="flex:1;min-width:220px" autocomplete="off"><button class="btn ghost sm" id="ap-ev" type="button">Evaluar</button></div>
 <small id="ap-res" class="sub"></small></div></div>
 <small id="ia-msg" class="msg"></small>
-<div class="nav-step"><button class="btn ghost" data-go="5" type="button">← Atrás</button><button class="btn pri" data-go="7" type="button">Siguiente: publicación →</button></div></div></section>
+<div class="nav-step"><button class="btn ghost" data-go="4" type="button">← Atrás</button><button class="btn pri" data-go="6" type="button">Siguiente: publicación →</button></div></div></section>
 
-<!-- 7 -->
-<section class="stp" data-n="7"><button class="stp-h" type="button" aria-expanded="false"><i class="num">7</i><span class="tt"><b>Publicación</b><small id="sum-7"></small></span><span class="chev">▾</span></button>
+<!-- 6 -->
+<section class="stp" data-n="6"><button class="stp-h" type="button" aria-expanded="false"><i class="num">6</i><span class="tt"><b>Publicación</b><small id="sum-6"></small></span><span class="chev">▾</span></button>
 <div class="stp-b">
 <div class="cfg"><label>Al subir a YouTube (solo si la plataforma es YouTube)<select id="c-publish"><option value="now">Publicar de inmediato (Público)</option><option value="schedule">Programar según los horarios</option></select></label></div>
 <div class="dest" id="dest">
@@ -228,10 +210,10 @@
 <label>Videos por día<input id="c-vn" type="number" min="0" max="6"></label>
 <label>Horarios Videos<input id="c-vt" placeholder="12:00,18:00"></label></div>
 <div><h3>Calendario previsto</h3><div id="sched" class="sched"></div></div></div>
-<div class="nav-step"><button class="btn ghost" data-go="6" type="button">← Atrás</button><button class="btn pri" data-go="8" type="button">Siguiente: ejecutar →</button></div></div></section>
+<div class="nav-step"><button class="btn ghost" data-go="5" type="button">← Atrás</button><button class="btn pri" data-go="7" type="button">Siguiente: ejecutar →</button></div></div></section>
 
-<!-- 8 -->
-<section class="stp" data-n="8"><button class="stp-h" type="button" aria-expanded="false"><i class="num">8</i><span class="tt"><b>Ejecutar</b><small id="sum-8">Todo automático</small></span><span class="chev">▾</span></button>
+<!-- 7 -->
+<section class="stp" data-n="7"><button class="stp-h" type="button" aria-expanded="false"><i class="num">7</i><span class="tt"><b>Ejecutar</b><small id="sum-7">Todo automático</small></span><span class="chev">▾</span></button>
 <div class="stp-b ctl">
 <p class="sub">No tenés que tocar nada más: el worker descarga, edita, sube a tu canal, toca "Siguiente" en cada etapa de Studio y publica.</p>
 <button class="btn pri big" id="start-up">Procesar y publicar todo ⚡</button>
@@ -240,10 +222,10 @@
 <button class="btn ghost sm" id="diag-btn" type="button">Ver diagnóstico del último error</button>
 <div id="ctl-msg" class="msg"></div>
 <h3>Progreso</h3><pre id="log" class="log">Esperando al worker...</pre>
-<div class="nav-step"><button class="btn ghost" data-go="7" type="button">← Atrás</button><button class="btn pri" data-go="9" type="button">Ver publicaciones →</button></div></div></section>
+<div class="nav-step"><button class="btn ghost" data-go="6" type="button">← Atrás</button><button class="btn pri" data-go="8" type="button">Ver publicaciones →</button></div></div></section>
 
-<!-- 9 -->
-<section class="stp" data-n="9"><button class="stp-h" type="button" aria-expanded="false"><i class="num">9</i><span class="tt"><b>Publicaciones</b><small id="sum-9">Estado de cada video</small></span><span class="chev">▾</span></button>
+<!-- 8 -->
+<section class="stp" data-n="8"><button class="stp-h" type="button" aria-expanded="false"><i class="num">8</i><span class="tt"><b>Publicaciones</b><small id="sum-8">Estado de cada video</small></span><span class="chev">▾</span></button>
 <div class="stp-b">
 <div id="cdwrap"></div>
 <div class="row pubtools"><button class="btn pri sm js-upall">Subir ahora los editados ⚡</button><button class="btn ghost sm danger" id="cancel-all">Cancelar todo lo que está en proceso</button><button class="btn ghost sm" id="export">Exportar cola ↓</button><button class="btn ghost sm danger" id="clean" type="button">🧹 Vaciar rastros…</button></div>

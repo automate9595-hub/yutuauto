@@ -35,7 +35,7 @@ if(scroll){const s=steps.find(x=>+x.dataset.n===n);if(s)setTimeout(()=>s.scrollI
 steps.forEach(s=>s.querySelector(".stp-h").onclick=()=>{const n=+s.dataset.n;if(s.classList.contains("open")){s.classList.remove("open");s.querySelector(".stp-h").setAttribute("aria-expanded","false")}else openStep(n,true)});
 document.querySelectorAll("[data-go]").forEach(b=>b.onclick=()=>openStep(+b.dataset.go,true));
 document.querySelectorAll(".grp-h").forEach(h=>h.onclick=()=>h.parentElement.classList.toggle("open"));
-openStep(Math.min(9,Math.max(1,+load(STEP_K,1)||1)),false);
+openStep(Math.min(8,Math.max(1,+load(STEP_K,1)||1)),false);
 
 /* ---------- resúmenes de cada paso ---------- */
 const L={lang:{"es-latino":"Español latino",es:"Español",en:"Inglés",auto:"Detectar idioma"},
@@ -48,15 +48,13 @@ const set=(n,t,ok)=>{$("sum-"+n).textContent=t;const s=steps.find(x=>+x.dataset.
 const sY=DSTP==="yt",oD=({fb:"Facebook",tt:"TikTok"})[DSTP]||"";
 set(1,W.worker?(sY?(W.yt?"Worker y canal conectados":"Worker conectado · falta conectar el canal"):"Worker conectado · subís a "+oD+" (no hace falta YouTube)"):"Worker apagado: ejecutá 2-INSTALAR-Y-EJECUTAR.bat",W.worker&&(!sY||W.yt));
 set(2,q.length?`${q.length} en cola · ${sh} Shorts · ${q.length-sh} videos`:"Pegá los links",q.length>0);
-set(3,cfg.sub?`${L.lang[cfg.lang]||cfg.lang} · ${L.stt[cfg.stt]||cfg.stt}`:"Sin subtítulos",true);
-$("g-voz").textContent=cfg.sub?(L.stt[cfg.stt]||""):"";$("g-asp").textContent=({bottom:"abajo",middle:"centro",top:"arriba"})[cfg.sub_pos]+" · "+({s:"pequeño",m:"mediano",l:"grande"})[cfg.sub_size];
 $("g-split").textContent=(+cfg.split_n||1)>1?cfg.split_n+" por video":"";
-set(4,`${(+cfg.split_n||1)>1?cfg.split_n+' Shorts por video (1 cada '+(cfg.split_gap||0)+' h) · ':''}Short ${fmtDur(cfg.short_len||60)} · ${({auto:"tramo automático",inicio:"desde el inicio",manual:"desde "+fmtDur(cfg.cut_start)})[cfg.cut_mode]}${cfg.vid_trim?" · videos recortados":""}`,true);
+set(3,`${(+cfg.split_n||1)>1?cfg.split_n+' Shorts por video (1 cada '+(cfg.split_gap||0)+' h) · ':''}Short ${fmtDur(cfg.short_len||60)} · ${({auto:"tramo automático",inicio:"desde el inicio",manual:"desde "+fmtDur(cfg.cut_start)})[cfg.cut_mode]}${cfg.vid_trim?" · videos recortados":""}`,true);
 const ac=["vivid","vignette","fade","loudnorm"].filter(k=>cfg[k]).length;
-set(5,`${cfg.fx_list.length?cfg.fx_list.length+" efectos":"Sin efectos"}${ac?" · "+ac+" de acabado":""}`,true);
-const tareas=["ia_text","ia_cut","ia_sub","ia_fx","ia_zoom"].filter(k=>cfg[k]).length;
-set(6,cfg.ia_mode==="apagado"?"IA apagada":`IA ${L.ia[cfg.ia_mode]||cfg.ia_mode} · ${tareas} tareas`,true);
-set(7,cfg.publish==="now"?"Publicar de inmediato":`Programar · ${cfg.sn} Shorts y ${cfg.vn} videos por día`,true);
+set(4,`${cfg.fx_list.length?cfg.fx_list.length+" efectos":"Sin efectos"}${ac?" · "+ac+" de acabado":""}`,true);
+const tareas=["ia_text","ia_cut","ia_fx","ia_zoom"].filter(k=>cfg[k]).length;
+set(5,cfg.ia_mode==="apagado"?"IA apagada":`IA ${L.ia[cfg.ia_mode]||cfg.ia_mode} · ${tareas} tareas`,true);
+set(6,cfg.publish==="now"?"Publicar de inmediato":`Programar · ${cfg.sn} Shorts y ${cfg.vn} videos por día`,true);
 $("sch-box").style.display=cfg.publish==="schedule"?"":"none"}
 
 const nOf=x=>Math.max(1,Math.min(30,+(x.n||cfg.split_n)||1));
@@ -113,7 +111,7 @@ try{const r=await fetch(API+path,body?{method:"POST",headers:{"Content-Type":"ap
 const setPill=(id,s,t)=>{const e=$(id);e.className="pill "+s;e.lastChild.textContent=t};
 const GO_TXT="Procesar y publicar todo ⚡";
 function setBusy(b){["start","start-up","dock-go"].forEach(i=>$(i).disabled=b);$("start-up").textContent=b?"Procesando…":GO_TXT;$("dock-go").textContent=b?"Procesando…":GO_TXT;$("start").textContent=b?"Procesando…":"Solo editar (sin subir) ▶";
-$("sum-8").textContent=b?"En marcha: no hace falta tocar nada":"Todo automático"}
+$("sum-7").textContent=b?"En marcha: no hace falta tocar nada":"Todo automático"}
 /* Cuenta regresiva grande hasta el próximo Short de cada piloto (se cuenta desde que termina la subida) */
 const CD={list:[],off:0,t:null};
 function cdFmt(s){s=Math.max(0,Math.round(s));const h=Math.floor(s/3600),m=Math.floor(s%3600/60),x=s%60,p=n=>String(n).padStart(2,"0");return (h?h+":"+p(m):p(m))+":"+p(x)}
@@ -141,7 +139,7 @@ $("connect").onclick=async()=>{const r=await call("/connect",{});if(!r)return no
 $("yt-detail").textContent=r.message||"Iniciá sesión en YouTube en el Chrome que se abrió.";poll()};
 const go=async upload=>{if(!q.length){openStep(2,true);return note("La cola está vacía: agregá links primero.",1)}
 const r=await call("/start",{config:cfg,items:q,upload,mode:cfg.publish==="schedule"?"schedule":"now",reedit:$("reedit").checked});if(!r)return note("No encuentro el worker. Ejecutá 2-INSTALAR-Y-EJECUTAR.bat.",1);
-note(r.message,!r.ok);if(r.ok){q.forEach(x=>delete x.nuevo);try{localStorage.setItem(K,JSON.stringify(q))}catch{}openStep(8,true)}poll()};
+note(r.message,!r.ok);if(r.ok){q.forEach(x=>delete x.nuevo);try{localStorage.setItem(K,JSON.stringify(q))}catch{}openStep(7,true)}poll()};
 $("start").onclick=()=>go(false);$("start-up").onclick=()=>go(true);$("dock-go").onclick=()=>go(true);
 poll();
 
@@ -153,7 +151,7 @@ function extrasTxt(x){const e=x.extras;if(!e)return"";const n={fb:"Facebook",tt:
 return Object.keys(e).map(k=>`<small class="${e[k].ok?"pgt":"err"}">${e[k].ok?"✓":"⚠"} ${n[k]||k}: ${esc(e[k].msg||"")}</small>`).join("")}
 function pubRender(items){W.items=items;quitarCancelados(items);const el=$("pub");$("s-pub").textContent=items.filter(x=>x.status==="published"||x.status==="scheduled").length;
 const nb=items.filter(x=>BUSY.includes(x.status)).length,nd=items.filter(x=>x.status==="published").length;
-$("sum-9").textContent=items.length?`${items.length} videos · ${nd} publicados${nb?" · "+nb+" en curso":""}`:"Estado de cada video";
+$("sum-8").textContent=items.length?`${items.length} videos · ${nd} publicados${nb?" · "+nb+" en curso":""}`:"Estado de cada video";
 if(!items.length){el.innerHTML='<div class="empty">Todavía no hay videos procesados.</div>';return}
 el.innerHTML=items.map(x=>{const st=x.status||"",pct=["ready","scheduled","published"].includes(st)?100:Math.max(0,Math.min(100,Math.round(x.pct||0)));
 const label=(x.stage&&BUSY.includes(st)?x.stage:ST[st]||st)+" · "+(x.est?"~":"")+pct+" %";
@@ -240,7 +238,7 @@ apLoad();
 const DST={plataforma:"yt",fb_page:""};let dstOk=false;const DST_N={yt:"YouTube",fb:"Facebook",tt:"TikTok"};
 function dstDraw(){["yt","fb","tt"].forEach(k=>{$("dest-"+k).checked=DST.plataforma===k;$("dd-"+k).classList.toggle("on",DST.plataforma===k)});
 $("dfb-login").parentElement.style.display=DST.plataforma==="fb"?"":"none";$("dtt-login").parentElement.style.display=DST.plataforma==="tt"?"":"none";
-const sm=$("sum-7");if(sm)sm.dataset.d=DST_N[DST.plataforma];
+const sm=$("sum-6");if(sm)sm.dataset.d=DST_N[DST.plataforma];
 DSTP=DST.plataforma;const yb=$("yt-block"),sk=$("yt-skip"),pe=$("p-yt"),yes=DST.plataforma==="yt";if(yb)yb.style.display=yes?"":"none";if(sk){sk.style.display=yes?"none":"";$("yt-skip-n").textContent=DST_N[DST.plataforma]}if(pe)pe.style.display=yes?"":"none";const yn=$("yt-need");if(yn)yn.style.display=yes?"":"none";sums()}
 async function dstSave(){const m=$("dest-msg");const r=await call("/destinos",DST,8000);m.className="sub"+(r&&r.ok?"":" err");m.textContent=r?(r.ok?"Guardado: todos los videos se subirán solo a "+DST_N[DST.plataforma]+".":r.message):"No encuentro el worker. Ejecutá 2-INSTALAR-Y-EJECUTAR.bat."}
 ["yt","fb","tt"].forEach(k=>{$("dest-"+k).onchange=e=>{if(e.target.checked){DST.plataforma=k;dstDraw();dstSave()}}});

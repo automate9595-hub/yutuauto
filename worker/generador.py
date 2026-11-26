@@ -236,13 +236,11 @@ def crear(it, cfg, MEDIA, FFMPEG, prog, chk, prohibidos=()):
         col = {"white": "&H00FFFFFF", "yellow": "&H0000FFFF", "green": "&H0080FF80"}.get(cfg.get("sub_color", "yellow"), "&H0000FFFF")
         size = {"s": 14, "m": 18, "l": 22}.get(cfg.get("sub_size", "m"), 18); al, mv = {"bottom": (2, 140), "middle": (10, 0), "top": (6, 80)}.get(cfg.get("sub_pos", "middle"), (10, 0))
         style = f"FontName=Arial,Alignment={al},FontSize={size},Bold=1,Outline=3,Shadow=0,PrimaryColour={col},OutlineColour=&H00000000,MarginV={mv}"
-        prog(0.86, "Subtítulos y exportación"); chk()
+        prog(0.86, "Exportando"); chk()
         final = MEDIA / f"{vid}_final.mp4"
         cmd = lambda vf: [str(FFMPEG), "-loglevel", "error", "-y", "-i", "base.mp4", "-i", "voz.wav"] + (["-vf", vf] if vf else ["-c:v", "copy"]) + \
               (["-c:v", "libx264", "-preset", "veryfast", "-crf", "22", "-pix_fmt", "yuv420p"] if vf else []) + ["-c:a", "aac", "-b:a", "160k", "-shortest", "-movflags", "+faststart", str(final)]
-        try: subprocess.run(cmd(f"subtitles=s.srt:force_style='{style}'"), cwd=tmp, check=True, capture_output=True)
-        except subprocess.CalledProcessError:
-            print("  FFmpeg no pudo quemar subtítulos; exporto sin ellos."); subprocess.run(cmd(""), cwd=tmp, check=True)
+        subprocess.run(cmd(""), cwd=tmp, check=True)                 # nunca se queman subtítulos
         prog(1.0, "Listo")
         return {"titulo": meta["titulo"], "descripcion": meta["descripcion"], "ayuda": ayuda + (" · voz " + voz_n)}
     finally: shutil.rmtree(tmp, ignore_errors=True)

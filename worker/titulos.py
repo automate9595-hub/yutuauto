@@ -102,6 +102,31 @@ def con_etiquetas(t, tags, maximo=100):
         if len(t) + 1 + len(h) <= maximo and h.lower() not in t.lower(): t += " " + h
     return t
 
+_VIDEO = re.compile(r"(?<!\w)#?v[ií]deos?(?!\w)", re.I)
+
+def sin_video(t, tags=None):
+    """Nunca queda la palabra «video»: se reemplaza por los hashtags por defecto. Sin hashtags repetidos ni signos sueltos."""
+    tags = etiquetas(tags)
+    t = _VIDEO.sub(" " + tags + " ", str(t or ""))
+    vistos = set()
+    def uno(m):
+        k = m.group(0).lower()
+        if k in vistos: return ""
+        vistos.add(k); return m.group(0)
+    t = re.sub(r"#\w+", uno, t)
+    t = re.sub(r"[ \t]+", " ", t)
+    t = re.sub(r"(^|\s)[,;:.\-–—]+(?=\s|$)", r"\1", t)
+    t = re.sub(r"[ \t]+([,.;:!?])", r"\1", t)
+    t = re.sub(r"[ \t]*\n[ \t]*", "\n", t)
+    return t.strip(" ,;:-–—\t")
+
+def ajustar(t, maximo=100):
+    """Recorta en una palabra completa (nunca a mitad de un hashtag)."""
+    t = str(t or "").strip()
+    if len(t) <= maximo: return t
+    corte = t[:maximo]
+    return (corte.rsplit(" ", 1)[0] if " " in corte else corte).rstrip(" ,;:-–—")
+
 def fallback(texto, tema, prohibidos, n=1):
     """Ultimo recurso sin IA: arma un titulo a partir de lo que se dice en el clip (no del titulo copiado)."""
     base = re.sub(r"\s+", " ", str(texto or "")).strip()

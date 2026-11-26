@@ -354,7 +354,7 @@ Descripciones que YA se usaron (la tuya NO puede repetir sus frases ni su estruc
 {aprendizaje.guia()}
 {PROMPT_ESTILO}
 {("OJO, el título anterior salió flojo: " + feedback + " Escribí uno claramente mejor.") if feedback else ""}
-Reglas: {("idioma: " + idioma + ".") if idioma else "mismo idioma del contenido."} Título de máximo 90 caracteres (contando los emojis) basado en lo que PASA en este clip, sin inventar datos; descripción atractiva de 2 a 3 frases con emojis y 3 a 5 hashtags al final.
+Reglas: NUNCA uses la palabra «video» ni «vídeo» (ni en el título ni en la descripción). {("idioma: " + idioma + ".") if idioma else "mismo idioma del contenido."} Título de máximo 90 caracteres (contando los emojis) basado en lo que PASA en este clip, sin inventar datos; descripción atractiva de 2 a 3 frases con emojis y 3 a 5 hashtags al final.
 Responde SOLO este JSON: {{"titulo": "...", "descripcion": "..."}}''', modo_textos(modo))
     try:
         t, desc = titulos.formatear(str(data["titulo"])), titulos.formatear_desc(str(data["descripcion"]), str(data["titulo"]))
