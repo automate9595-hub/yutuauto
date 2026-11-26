@@ -69,7 +69,7 @@
 <section class="card pad" id="fb" style="display:grid;gap:12px;margin:0 0 16px">
 <h3 style="margin:0">📘 Piloto Facebook: reels por tema o por cuenta</h3>
 <p class="sub" style="margin:0">Busca reels en Facebook en segundo plano (sin abrir ventanas), los descarga, los edita y los sube a tu canal. Nunca repite el reel, el título ni el fragmento.</p>
-<div class="row"><select id="fb-modo" style="min-width:150px"><option value="tema">Por tema central</option><option value="cuenta">Por cuenta / página</option></select>
+<div class="row"><select id="fb-modo" style="min-width:150px"><option value="tema">Por tema central</option><option value="cuenta">Por cuenta / página (pegá el enlace)</option></select>
 <input id="fb-fuente" type="search" placeholder="Tema central · ej: Mobile Legends" style="flex:1;min-width:220px" autocomplete="off"></div>
 <div class="cfg" style="grid-template-columns:repeat(auto-fit,minmax(130px,1fr))">
 <label>Shorts por día<input id="fb-shorts" type="number" min="0" max="60"></label>
@@ -175,7 +175,9 @@
 <p class="sub">Gemini, Groq y Claude se turnan: si uno falla o no tiene cuota, sigue el siguiente, y si fallan todos la edición continúa igual. Las claves se guardan solo en tu PC (<code>worker\claves-ia.json</code>). <span id="ia-est"></span></p>
 <div class="grp open"><button class="grp-h" type="button">Qué hace la IA</button><div class="grp-b cfg">
 <label>Cómo se turnan<select id="c-ia_mode"><option value="alternar">Alternar las 3 (una por tarea)</option><option value="groq_primero">Groq primero, las otras de respaldo</option><option value="gemini_primero">Gemini primero, las otras de respaldo</option><option value="claude_primero">Claude primero, las otras de respaldo</option><option value="solo_gemini">Solo Gemini</option><option value="solo_groq">Solo Groq</option><option value="solo_claude">Solo Claude</option><option value="apagado">IA apagada</option></select></label>
-<label class="chk"><input id="c-ia_text" type="checkbox"> Escribir título y descripción (si la IA no responde, se sube con el nombre del archivo)</label>
+<label class="chk"><input id="c-ia_text" type="checkbox"> Escribir título y descripción (si la IA no responde, se arma un título propio con lo que se dice en el clip y los hashtags de abajo)</label>
+<div class="cfg" style="margin-top:8px"><label>Hashtags por defecto (cuando la IA no responde o está apagada)<input id="c-hashtags_base" type="text" placeholder="#MobileLegends #mlbb #shorts #gameplay #fyp"></label></div>
+<label class="chk"><input id="c-hashtags_titulo" type="checkbox"> En ese caso, ponerlos también al final del título (los que entren)</label>
 <label class="chk"><input id="c-ia_cut" type="checkbox"> Elegir el mejor tramo (Shorts en modo automático)</label>
 <label class="chk"><input id="c-ia_sub" type="checkbox"> Corregir los subtítulos</label>
 <label class="chk"><input id="c-ia_fx" type="checkbox"> Elegir y combinar efectos</label>

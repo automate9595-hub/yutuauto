@@ -555,8 +555,7 @@ def guardar_fb(p):
 def configurar_fb(d):
     p = leer_fb(); modo = d.get("modo") if d.get("modo") in ("tema", "cuenta") else p.get("modo", "tema")
     tema = str(d.get("tema", p.get("tema", ""))).strip()[:120]; cuenta = str(d.get("cuenta", p.get("cuenta", ""))).strip()[:200]
-    if cuenta: cuenta = facebook.nombre_cuenta(cuenta) or cuenta
-    if (modo, tema, cuenta) != (p.get("modo"), p.get("tema"), p.get("cuenta")): p.update(fuentes=[], muertas=[], cache={}, rechazados=[], lista=[], lista_t=0, inicio=None, hoy={})
+    if (modo, tema, cuenta) != (p.get("modo"), p.get("tema"), p.get("cuenta")): p.update(fuentes=[], muertas=[], cache={}, rechazados=[], lista=[], lista_t=0, inicio=None, hoy={}, cuenta_res="")
     p.update(activo=bool(d.get("activo")), modo=modo, tema=tema, cuenta=cuenta, shorts=max(0, min(int(d.get("shorts", 10)), 60)),
              videos=max(0, min(int(d.get("videos", 0)), 30)), dias=max(1, min(int(d.get("dias", 30)), 365)), cada=max(0, min(int(d.get("cada", 0) or 0), 1440)),
              verificar=bool(d.get("verificar", True)), **_rango(d), **_rank(d, p))
@@ -627,16 +626,23 @@ def tick_fb(items_existentes, log=print):
         if not p.get("lista") and time.time() - p.get("lista_t", 0) < 600: return []
         if not p.get("lista") or time.time() - p.get("lista_t", 0) > 6 * 3600 or not libres(p["lista"]):
             if time.time() - p.get("lista_t", 0) > 600 or not p.get("lista"):
-                p["estado"] = f"Leyendo los reels de {p['cuenta']} (segundo plano)…"; guardar_fb(p)
-                try: nueva = facebook.listar(facebook.url_cuenta(p["cuenta"]), log, scrolls=14)
-                except Exception as e: nueva = []; log("Facebook: error leyendo la cuenta: " + str(e)[:80])
+                p["estado"] = f"Leyendo los reels de {facebook.nombre_cuenta(p['cuenta'])} (segundo plano)…"; guardar_fb(p)
+                nueva = []; urls = facebook.urls_cuenta(p["cuenta"])
+                if facebook._base_cuenta(p["cuenta"])[0] == "url" and urls:                    # enlace /share/…: se resuelve a la página real
+                    fin = p.get("cuenta_res") or facebook.resolver(urls[0], log)
+                    if fin and fin != urls[0]: p["cuenta_res"] = fin; urls = (facebook.urls_cuenta(fin) if facebook._base_cuenta(fin)[0] != "url" else [fin]) + urls
+                for u in urls or [""]:                  # primero la pestaña de Reels y, si no hay, la de Videos
+                    if not u: break
+                    try: nueva = facebook.listar(u, log, scrolls=14)
+                    except Exception as e: nueva = []; log("Facebook: error leyendo la cuenta: " + str(e)[:80])
+                    if nueva or facebook.MOTIVO.get("m") in ("login", "captcha", "sin_chrome", "noexiste"): break
                 p["lista_t"] = time.time()
                 if nueva: p["lista"] = nueva
                 elif not p.get("lista"):
                     p["estado"] = MSG_FB.get(facebook.MOTIVO.get("m"), "La cuenta no devolvió reels (¿mal escrita, sin reels o Facebook la bloqueó?). Probá «Iniciar sesión en Facebook» y reintento en 10 min.")
                     guardar_fb(p); log("Facebook: " + p["estado"]); return []
         v, contd = elegir_de(p["lista"], p["cuenta"])
-        if v: return tomar(v, "@" + p["cuenta"])
+        if v: return tomar(v, "@" + facebook.nombre_cuenta(p["cuenta"]))
         p["estado"] = "Ya se usaron (o no sirvieron) los reels leídos; releo la cuenta en el próximo ciclo." if not libres(p["lista"]) else f"Revisé reels y ninguno sirvió (fuera de duración: {contd['dur']} · repetidos: {contd['rep']}); pruebo otros en el próximo ciclo."
         if not libres(p["lista"]): p["lista_t"] = min(p.get("lista_t", 0), time.time() - 6 * 3600 - 1)
         guardar_fb(p); return []

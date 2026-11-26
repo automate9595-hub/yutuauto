@@ -73,23 +73,63 @@ def sesion_iniciada():
 
 
 # ------------------------------------------------------------------ direcciones
-def url_cuenta(cuenta):
-    """Página de reels de una cuenta/página: acepta el nombre, @nombre o el enlace completo."""
+_RESERVADOS = {"reel", "reels", "watch", "videos", "groups", "share", "pages", "people", "p", "profile.php", "hashtag", "search", "photo", "story.php", "permalink.php"}
+
+def _base_cuenta(cuenta):
+    """Entiende lo que pegue el usuario: enlace de la página (con o sin /reels, /videos, ?mibextid...), /people/Nombre/ID, /p/Nombre-ID,
+    profile.php?id=ID, enlace /share/..., @nombre o solo el nombre. Devuelve ('id', ID) | ('nombre', x) | ('url', enlace) | ('', '')."""
     c = str(cuenta or "").strip()
+    if not c: return "", ""
     m = re.search(r"profile\.php\?id=(\d+)", c)
-    if m: return f"https://www.facebook.com/profile.php?id={m.group(1)}&sk=reels_tab"
+    if m: return "id", m.group(1)
+    m = re.search(r"facebook\.com/(?:people|pages)/[^/?#]+/(\d{6,})", c)
+    if m: return "id", m.group(1)
+    m = re.search(r"facebook\.com/p/[^/?#]*?(\d{8,})", c)
+    if m: return "id", m.group(1)
+    if re.search(r"(?:facebook|fb)\.com/(?:share|groups)/", c):
+        u = c if c.startswith("http") else "https://" + c.lstrip("/")
+        return "url", u.split("#")[0]
     m = re.search(r"(?:facebook|fb)\.com/([\w.\-]+)", c)
-    nombre = m.group(1) if m else c.lstrip("@/ ")
-    nombre = re.sub(r"[^\w.\-]", "", nombre)
-    return f"https://www.facebook.com/{nombre}/reels/" if nombre else ""
+    n = re.sub(r"[^\w.\-]", "", m.group(1) if m else c.lstrip("@/ ").split("/")[0].split("?")[0])
+    if re.fullmatch(r"\d{8,}", n): return "id", n                                       # facebook.com/61576731622656/
+    return ("nombre", n) if n and n.lower() not in _RESERVADOS else ("", "")
+
+def urls_cuenta(cuenta):
+    """Direcciones a probar, en orden: pestaña de Reels y pestaña de Videos de esa página/cuenta."""
+    k, v = _base_cuenta(cuenta)
+    if k == "id": return [f"https://www.facebook.com/profile.php?id={v}&sk=reels_tab", f"https://www.facebook.com/profile.php?id={v}&sk=videos"]
+    if k == "nombre": return [f"https://www.facebook.com/{v}/reels/", f"https://www.facebook.com/{v}/videos/"]
+    if k == "url": return [v]
+    return []
+
+def url_cuenta(cuenta):
+    u = urls_cuenta(cuenta); return u[0] if u else ""
 
 
 def nombre_cuenta(cuenta):
-    c = str(cuenta or "").strip()
-    m = re.search(r"profile\.php\?id=(\d+)", c)
-    if m: return "id" + m.group(1)
-    m = re.search(r"(?:facebook|fb)\.com/([\w.\-]+)", c)
-    return re.sub(r"[^\w.\-]", "", m.group(1) if m else c.lstrip("@/ "))
+    """Nombre corto para mostrar en los mensajes."""
+    k, v = _base_cuenta(cuenta)
+    if k == "id": return "id" + v
+    if k == "url": return re.sub(r"^https?://(www\.)?", "", v)[:40]
+    return v or str(cuenta or "").strip()[:40]
+
+
+def resolver(url, log=print):
+    """Enlace /share/...: lo abre en el Chrome oculto, espera la redirección y devuelve la dirección real de la página ('' si no se pudo)."""
+    tab = None
+    try:
+        tab = _tab(url); fin = time.time() + 25; u = ""
+        while time.time() < fin:
+            time.sleep(1.5)
+            try: u = json.loads(tab.eval(JS_ESTADO) or "{}").get("u") or ""
+            except Exception: u = ""
+            if u and "/share/" not in u and "about:blank" not in u: break
+        if not u or "/share/" in u or "/login" in u or "checkpoint" in u: return ""
+        return u.split("#")[0]
+    except Exception as e: log("Facebook: no pude resolver el enlace: " + str(e)[:80]); return ""
+    finally:
+        try: tab and tab.cerrar()
+        except Exception: pass
 
 
 def url_fuente(f):

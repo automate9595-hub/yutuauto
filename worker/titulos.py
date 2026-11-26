@@ -82,6 +82,26 @@ def formatear_desc(d, titulo=""):
             d = (cuerpo.rstrip() + " " + _elige(EMOJIS_DESC, sem + "x", 2)[1] + ("\n" + tags if tags else "")).strip()
     return d
 
+TAGS_DEF = "#MobileLegends #mlbb #shorts #gameplay #fyp"
+
+def etiquetas(s=None):
+    """Hashtags por defecto (cuando la IA no responde o está apagada). Acepta con o sin # y separados por espacios o comas."""
+    t = [("#" + x.lstrip("#")) for x in re.split(r"[\s,;]+", str(s if s is not None and str(s).strip() else TAGS_DEF)) if x.strip("#")]
+    return " ".join(dict.fromkeys(t))
+
+def limpiar_original(t):
+    """El título copiado sin hashtags, enlaces ni palabras vacías como 'video' o 'reel' (para dárselo a la IA o decidir si dice algo)."""
+    t = re.sub(r"https?://\S+|#\w+", " ", str(t or ""))
+    t = re.sub(r"\b(video|reel|reels|short|shorts)\b[\s,.:;-]*", " ", t, flags=re.I)
+    return re.sub(r"\s+", " ", t).strip(" ,.;:-")
+
+def con_etiquetas(t, tags, maximo=100):
+    """Agrega al final del título los hashtags que entren completos (sin cortar ninguno a la mitad)."""
+    t = str(t or "").strip()
+    for h in str(tags or "").split():
+        if len(t) + 1 + len(h) <= maximo and h.lower() not in t.lower(): t += " " + h
+    return t
+
 def fallback(texto, tema, prohibidos, n=1):
     """Ultimo recurso sin IA: arma un titulo a partir de lo que se dice en el clip (no del titulo copiado)."""
     base = re.sub(r"\s+", " ", str(texto or "")).strip()
@@ -118,17 +138,17 @@ def registrar_desc(desc):
             u = (u + [str(desc)[:600]])[-1500:]
             tmp = DF.with_suffix(".tmp"); tmp.write_text(json.dumps({"usadas": u}, ensure_ascii=False, indent=1), "utf-8"); os.replace(tmp, DF)
 
-def desc_fallback(titulo, texto, tema, otras, k=1):
+def desc_fallback(titulo, texto, tema, otras, k=1, tags=None):
     """Descripcion propia y unica armada con el titulo y lo que se dice en el clip."""
     frases = [f.strip() for f in re.split(r"(?<=[.!?])\s+", re.sub(r"\s+", " ", str(texto or ""))) if len(f.strip()) > 12]
     base = (" ".join(frases[:2])[:230] + "\n\n") if frases else ""
-    tag = re.sub(r"[^\w]", "", str(tema or "").title()) or "Viral"
-    cand = [f"🔥 {titulo}\n\n{base}👀 ¡Mirá hasta el final!\n\n#{tag} #shorts #viral", f"{base}😱 {titulo} · ¡no te lo pierdas! 👇\n\n#{tag} #shorts #viral"]
+    tag = etiquetas(tags)
+    cand = [f"🔥 {titulo}\n\n{base}👀 ¡Mirá hasta el final!\n\n{tag}", f"{base}😱 {titulo} · ¡no te lo pierdas! 👇\n\n{tag}"]
     for c in cand:
         c = formatear_desc(c, titulo)
         if not desc_repetida(c, otras): return c.strip()
     n = k
     while True:
-        c = formatear_desc(f"🔥 {titulo}\n\n{base}Parte {n} 👀\n\n#{tag} #shorts #viral", titulo)
+        c = formatear_desc(f"🔥 {titulo}\n\n{base}Parte {n} 👀\n\n{tag}", titulo)
         if not desc_repetida(c, otras): return c.strip()
         n += 1

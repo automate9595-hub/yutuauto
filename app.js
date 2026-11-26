@@ -6,7 +6,7 @@ sub:true,lang:"es-latino",stt:"auto",model:"small",sub_pos:"bottom",sub_size:"m"
 cut_mode:"auto",cut_start:0,short_len:60,frame:"crop",vid_trim:false,vid_start:0,vid_len:0,
 fx_list:[],fx_mode:"seq",fx_dur:3,fx_gap:0,fx_blend:0.6,fx_power:1,fx_start:0,fx_repeat:true,
 vivid:false,vignette:false,fade:false,loudnorm:false,
-ia_mode:"alternar",ia_cut:true,ia_fx:true,ia_zoom:true,lista_cada:0,ia_sub:true,ia_text:true,
+ia_mode:"alternar",ia_cut:true,ia_fx:true,ia_zoom:true,lista_cada:0,ia_sub:true,ia_text:true,hashtags_base:"#MobileLegends #mlbb #shorts #gameplay #fyp",hashtags_titulo:true,
 split_n:1,split_gap:6,split_mode:"auto",auto_reanudar:true};
 let saved=load(C,null);if(saved===null){saved=load(C_OLD,{});delete saved.publish}   /* migra la config anterior; la publicación vuelve a "inmediata" */
 let cfg=Object.assign({},DEF,saved);if(String(cfg.ia_mode).includes("grok"))cfg.ia_mode=String(cfg.ia_mode).replace("grok","groq");
@@ -250,12 +250,12 @@ dstDraw();dstLoad();setInterval(dstLoad,5000);
 /* ---------- piloto Facebook (reels) ---------- */
 const FB_K="yutu-piloto-fb",fbo=Object.assign({modo:"tema",tema:"",cuenta:"",shorts:10,videos:0,dias:30},load(FB_K,{}));
 const fbSave=()=>{try{localStorage.setItem(FB_K,JSON.stringify(fbo))}catch{}};
-const fbFuente=()=>{const c=fbo.modo==="cuenta";$("fb-fuente").value=c?fbo.cuenta:fbo.tema;$("fb-fuente").placeholder=c?"Cuenta o página · ej: nombrepagina o facebook.com/nombrepagina":"Tema central · ej: Mobile Legends"};
+const fbFuente=()=>{const c=fbo.modo==="cuenta";$("fb-fuente").value=c?fbo.cuenta:fbo.tema;$("fb-fuente").placeholder=c?"Pegá el enlace de la página de Facebook · ej: https://www.facebook.com/nombrepagina":"Tema central · ej: Mobile Legends"};
 $("fb-modo").value=fbo.modo;fbFuente();
 $("fb-modo").onchange=()=>{fbo.modo=$("fb-modo").value;fbSave();fbFuente()};
 $("fb-fuente").oninput=e=>{fbo[fbo.modo==="cuenta"?"cuenta":"tema"]=e.target.value;fbSave()};
 for(const k of["shorts","videos","dias"]){const el=$("fb-"+k);el.value=fbo[k];el.oninput=()=>{fbo[k]=Math.max(0,+el.value||0);fbSave()}}
-const fbSend=async activo=>{const m=$("fb-msg"),c=fbo.modo==="cuenta";if(activo&&!(c?fbo.cuenta:fbo.tema).trim()){m.textContent=c?"Escribí la cuenta o página.":"Escribí el tema central.";m.className="msg err";return}
+const fbSend=async activo=>{const m=$("fb-msg"),c=fbo.modo==="cuenta";if(activo&&!(c?fbo.cuenta:fbo.tema).trim()){m.textContent=c?"Pegá el enlace de la página de Facebook.":"Escribí el tema central.";m.className="msg err";return}
 const r=await call("/piloto-facebook",{...fbo,activo,config:cfg},8000);m.className="msg"+(r&&r.ok?"":" err");m.textContent=r?r.message:"No encuentro el worker. Ejecutá 2-INSTALAR-Y-EJECUTAR.bat.";fbPoll()};
 $("fb-on").onclick=()=>fbSend(true);$("fb-off").onclick=()=>fbSend(false);
 async function fbPoll(){if(document.hidden)return;const s=await call("/status");if(!s||!s.facebook||!(s.facebook.tema||s.facebook.cuenta))return;const p=s.facebook;

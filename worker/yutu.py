@@ -803,6 +803,8 @@ def textos_para_subir(it, cfg):
     Devuelve (titulo, descripcion): el titulo siempre existe."""
     if it.get("final_title") and it.get("ia_desc"): return titulos.formatear(it["final_title"], 100), titulos.formatear_desc(it["ia_desc"], it["final_title"])      # reintento/reanudación: ya tiene su título único
     original = it.get("title", "") if it.get("type") != "gen" else ""
+    orig_ia = titulos.limpiar_original(orig_ia) or "(sin título)"       # sin hashtags ni "video"
+    tags = titulos.etiquetas((cfg or {}).get("hashtags_base")); uso_fallback = False
     prohibidos = titulos.usados([i.get("final_title") or i.get("ia_title") for i in (D["items"] if D else []) if i is not it]) + ([original] if original else [])
     t, desc = (it.get("ia_title") or "").strip(), (it.get("ia_desc") or "").strip()
     srt = MEDIA / f"{fid(it) if it.get('id') else ''}.srt"
@@ -814,12 +816,12 @@ def textos_para_subir(it, cfg):
         if activa:
             try:
                 paso("pidiendo título y descripción nuevos a la IA")
-                r = ia.textos(modo, original or it.get("title", ""), texto, it.get("kind", "video"), prohibidos, (cfg or {}).get("idioma_titulo", ""))
+                r = ia.textos(modo, orig_ia, texto, it.get("kind", "video"), prohibidos, (cfg or {}).get("idioma_titulo", ""))
                 if r: t, desc = r["titulo"].strip(), r["descripcion"].strip(); print(f"  [IA {r['prov']}] Título: {t}")
             except Exception as e: print("  [IA] No pude generar el título:", str(e)[:120])
     if not t or titulos.repetido(t, prohibidos):
         tema = (cfg or {}).get("tema_titulo", "") or ("Mobile Legends" if "mobile legends" in (original + " " + texto).lower() else "")
-        t = titulos.fallback(texto, tema, prohibidos, len(titulos.usados()) + 1)
+        t = titulos.fallback(texto, tema, prohibidos, len(titulos.usados()) + 1); uso_fallback = True
         print("  Título propio (sin IA disponible):", t)
     if activa and t:                           # control de calidad: claro, específico y con razón para hacer clic (lo que Yutu aprendió); si es flojo se pide uno mejor
         sc, probs = aprendizaje.evaluar(t)
@@ -827,7 +829,7 @@ def textos_para_subir(it, cfg):
             if sc >= aprendizaje.MIN: break
             print(f"  Título flojo ({sc}/100: {'; '.join(probs)[:110]}): pido uno mejor.")
             try:
-                r = ia.textos(modo, original or it.get("title", ""), texto, it.get("kind", "video"), prohibidos + [t], (cfg or {}).get("idioma_titulo", ""), (), "; ".join(probs))
+                r = ia.textos(modo, orig_ia, texto, it.get("kind", "video"), prohibidos + [t], (cfg or {}).get("idioma_titulo", ""), (), "; ".join(probs))
             except Exception: r = None
             if not r or titulos.repetido(r["titulo"], prohibidos + [t]): continue
             sc2, pr2 = aprendizaje.evaluar(r["titulo"])
@@ -838,13 +840,16 @@ def textos_para_subir(it, cfg):
         if desc: print("  Descripción repetida, pido otra."); otras = otras + [desc]; desc = ""
         if activa:
             try:
-                r = ia.textos(modo, original or it.get("title", ""), texto, it.get("kind", "video"), prohibidos + [t], (cfg or {}).get("idioma_titulo", ""), otras)
+                r = ia.textos(modo, orig_ia, texto, it.get("kind", "video"), prohibidos + [t], (cfg or {}).get("idioma_titulo", ""), otras)
                 if r and not titulos.repetido(r["titulo"], prohibidos + [t]) : desc = r["descripcion"].strip()
                 elif r: desc = r["descripcion"].strip()
             except Exception: pass
     if not desc or titulos.desc_repetida(desc, otras):
-        desc = titulos.desc_fallback(t, texto, (cfg or {}).get("tema_titulo", ""), otras, len(otras) + 1); print("  Descripción propia (única).")
+        desc = titulos.desc_fallback(t, texto, (cfg or {}).get("tema_titulo", ""), otras, len(otras) + 1, tags); print("  Descripción propia (única).")
     t, desc = titulos.formatear(t, 95), titulos.formatear_desc(desc, t)                  # SIEMPRE en MAYÚSCULAS y con emojis
+    if uso_fallback:                                                                     # sin IA: los hashtags por defecto van en la descripción y (si está activado) al final del título
+        if not all(h.lower() in desc.lower() for h in tags.split()): desc = desc.rstrip() + "\n\n" + tags
+        if (cfg or {}).get("hashtags_titulo", True): t = titulos.con_etiquetas(t, tags, 100)
     it["ia_title"], it["ia_desc"], it["final_title"] = t, desc, t[:100]
     titulos.registrar(t[:100]); titulos.registrar_desc(desc)      # quedan guardados ya: ningun otro video podra repetirlos
     return t[:100], desc
